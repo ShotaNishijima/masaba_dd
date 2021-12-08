@@ -1,48 +1,52 @@
 
-######################################################################
-### 4D model for estimating density-dependent MSY reference points ###
-###### --- A density-dependent delay-difference model --- ############
-######################################################################
+###############################################################################
+### Estimating Population-level density dependence and MSY reference points ###
+### by incorporating individual-level (post-recruit) density dependence #######
+############################### Shota Nishijima ###############################
 
-setwd("~/git/masaba2020/4D")
+### set workind directory ---- 
 
-library(devtools)
+gitdir = "~/git/masaba_dd"
+
+setwd(gitdir)
+
+savedir = "res"
+
+if (!file.exists(savedir)) dir.create(savedir)
+
+savename = function(x) paste0(savedir,"/",x)
+
+### read packages ----
+
 # devtools::install_github("ichimomo/frasyr", ref="dev")
-# rm(list = c("base", "logit"))
-load_all("~/git/frasyr")
 
-# install.packages("betareg")
-# install.packages("lmtest")
-# library(frasyr)
-
+library(frasyr)
 library(tidyverse)
-# library(glmmTMB)
-# library(lme4)
-# library(nlme)
 library(MASS)
 library(MuMIn)
+options(na.action = "na.fail")
+library("dplyr", character.only = TRUE)
+
+library(broom.mixed)
 library(betareg)
 library(lmtest)
 # install.packages("effects")
-library(effects)
-library(investr)
+# library(effects)
+# install.packages("investr")
+# library(investr)
 
-# rm(base)
-vpares = get(load("../vpa/vpa_masaba_P2020.rda"))
-# vpares = base
+### read and handle data ----
 
-# weight growth modeling 
+# vpa estimates from the stock assessment in Japan
+vpares = get(load("data/vpa_masaba_P2021.rda"))
+
 
 waa_dat = expand.grid(Age=as.numeric(rownames(vpares$naa)),
-            Year=as.numeric(colnames(vpares$naa))
-            ) %>% mutate(
-              Weight=as.numeric(unlist(vpares$input$dat$waa)),
-              Maturity=as.numeric(unlist(vpares$input$dat$maa))
-            )
+                      Year=as.numeric(colnames(vpares$naa))) %>% 
+  mutate(Weight=as.numeric(unlist(vpares$input$dat$waa)),
+         Maturity=as.numeric(unlist(vpares$input$dat$maa)))
+
 A = waa_dat$Age %>% max
-
-
-
 
 waa_prev = sapply(1:nrow(waa_dat), function(i) {
   if (waa_dat$Age[i]==0 | waa_dat$Year[i]==min(waa_dat$Year)) {
@@ -76,58 +80,121 @@ num_prev = sapply(1:nrow(waa_dat), function(i) {
   value
 })
 
-
-library(glmmTMB)
-
-
 waa_dat = waa_dat %>%
   mutate(Weight_prev=waa_prev,
          Number_prev=num_prev/1000) %>%
   mutate(logN_prev=log(num_prev)) %>%
   mutate(YearClass=Year-Age) %>%
-  mutate(YearClass2 = numFactor(YearClass)) %>%
-  mutate(group = factor(1))
+  mutate(interact_norm = Weight_prev*Number_prev,
+         interact_log = Weight_prev*logN_prev) %>%
+  filter(Year<max(Year))
+
+### modeling individual-level density dependence ----
+
+## weight growth modeling ----
+
+waa_dat2 = na.omit(waa_dat)
+
+# full_w_growth = glm(Weight~Weight_prev+Number_prev+log(Number_prev)+interact_norm+interact_log,data=waa_dat2)
+
+# using Gamma distribution due to heterogeneity in variance 
+full_w_growth = glm(Weight~Weight_prev+Number_prev+log(Number_prev)+interact_norm+interact_log,data=waa_dat2,
+                    family=Gamma("identity"))
+summary(full_w_growth)
+
+getAllTerms(full_w_growth)
+
+dredge_w_growth = dredge(full_w_growth,fixed="Weight_prev",
+                         subset=!("Number_prev" && "log(Number_prev)") & !("interact_norm" && "interact_log") & !("Number_prev" && "interact_log") & !("log(Number_prev)" && "interact_norm"))
+
+head(dredge_w_growth,100)
+
+save(dredge_w_growth,file=savename("dredge_w_growth.rda"))
+
+model_sel_w_growth = model.sel(dredge_w_growth,beta="sd")
+write.csv(model_sel_w_growth,file=savename("AICc_table_w_growth.csv"))
+
+mod_w_growth = get.models(dredge_w_growth,subset=1)[[1]]
+summary(mod_w_growth)
 
 
+tmp = predict(mod_w_growth,se.fit=TRUE)
+tmp$fit
+waa_preddat=waa_dat2 %>% mutate(pred=tmp$fit)
 
-x = c(log(1000),log(0.3))
+## figure weight growth ----
 
-waa_dat2 = na.omit(waa_dat) %>% filter(Year<max(Year))
-nrow(waa_dat2)
+base_size=12
+point_size=1.5
+path_size=1.2
 
-View(waa_dat2)
+waa_dat2$Number_prev %>% summary()
+newdata_wg = expand.grid(Weight_prev=seq(min(waa_dat2$Weight_prev)*1,max(waa_dat2$Weight_prev)*1,length=100),
+                         Number_prev=c(quantile(waa_dat2$Number_prev,probs=c(0.1,0.9)),mean(waa_dat2$Number_prev))) %>%
+  as.data.frame()
 
+newdata_wg = newdata_wg %>% mutate(Weight=predict(mod_w_growth,newdata=newdata_wg))
 
-mod1 = glmmTMB(Weight~Weight_prev,data=waa_dat2)
-summary(mod1)
+(g_wg = ggplot(data=NULL,aes(x=Weight_prev,y=Weight))+
+  geom_point(data=waa_dat2,aes(colour=Number_prev),size=point_size)+xlim(0,NA)+ylim(0,NA)+
+    geom_path(data=newdata_wg,aes(colour=Number_prev,group=Number_prev),size=path_size)+
+   scale_colour_gradient(low="deepskyblue",high="sienna1",name="Abundance")+
+   theme_bw(base_size=base_size)+
+    xlab("Weight in year t-1")+ylab("Weight in year t")
+)
 
-mod2 = glmmTMB(Weight~Weight_prev+(1|YearClass2),data=waa_dat2)
-summary(mod2)
+ggsave(g_wg,filename=savename("weight_growth.png"),dpi=600,height=100,width=150,unit="mm")
 
-# mod3 = glmmTMB(Weight~Weight_prev+ar1(YearClass2+0|group),data=waa_dat2)
-# summary(mod3)
+save(g_wg,file=savename("weight_growth_graph.rda"))
 
-mod4 = glmmTMB(Weight~Weight_prev*logN_prev,data=waa_dat2)
-summary(mod4)
+## initial weight modeling ----
 
-mod5 = glmmTMB(Weight~Weight_prev+logN_prev,data=waa_dat2)
-summary(mod5)
+w0_dat = waa_dat %>% filter(Age==0 & Year>min(Year))
 
-mod6 = glmmTMB(Weight~Weight_prev+Number_prev,data=waa_dat2)
-summary(mod6)
+# w0_dat$Year
+# waa_dat$Year
 
-mod7 = glmmTMB(Weight~Weight_prev*Number_prev,data=waa_dat2)
-summary(mod7)
+plot(Weight~Number_prev,data=w0_dat,log="x")
 
-mod8 = glmmTMB(Weight~Weight_prev+Number_prev+(1|YearClass2),data=waa_dat2)
-summary(mod8)
+full_w0 = glm(Weight~Number_prev+log(Number_prev),data=w0_dat,family=Gamma("identity"))
+summary(full_w0)
 
-# mod9 = glmmTMB(Weight~Weight_prev+Number_prev+ar1(numFactor(waa_dat2$Year)+0|group),data=waa_dat2)
-# summary(mod9)
+dredge_w0 = dredge(full_w0,subset=!("Number_prev" && "log(Number_prev)"))
 
-library(betareg)
+head(dredge_w0,100)
 
-waa_dat$Maturity %>% unique() %>% sort
+save(dredge_w0,file=savename("dredge_w0.rda"))
+
+model_sel_w0 = model.sel(dredge_w0,beta="sd")
+write.csv(model_sel_w0,file=savename("AICc_table_w0.csv"))
+
+mod_w0 = get.models(dredge_w0,subset=1)[[1]]
+summary(mod_w0)
+
+newdata_w0 = expand.grid(Number_prev=exp(seq(log(min(w0_dat$Number_prev)),log(max(w0_dat$Number_prev)),length=200))) %>%
+  as.data.frame()
+
+tmp = predict(mod_w0,newdata=newdata_w0,se.fit=TRUE)
+
+newdata_w0 = newdata_w0 %>% mutate(Weight=tmp$fit,SE=tmp$se.fit) %>% 
+  mutate(Upper=Weight+1.96*SE,Lower=Weight-1.96*SE)
+
+(g_w0 = ggplot(data=NULL,aes(y=Weight,x=Number_prev))+
+    geom_ribbon(data=newdata_w0,aes(ymax=Upper,ymin=Lower),alpha=0.4)+
+    geom_point(data=w0_dat,size=point_size)+ylim(0,NA)+
+    geom_path(data=newdata_w0,size=path_size)+
+    # scale_colour_gradient(low="deepskyblue",high="sienna1",name="Abundance")+
+    theme_bw(base_size=base_size)+
+    ylab("Weight at age 0")+xlab("Abundance (billion)")+
+    scale_x_log10()
+)
+
+save(g_w0,file=savename("weight_age0_graph.rda"))
+
+ggsave(g_w0,filename=savename("weight_age0.png"),dpi=600,height=100,width=150,unit="mm")
+
+save.image(".RData")
+
 
 waa_dat = waa_dat %>% 
   mutate(Maturity_c = (Maturity*(n()-1)+0.5)/n())
