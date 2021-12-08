@@ -29,7 +29,7 @@ library("dplyr", character.only = TRUE)
 
 library(broom.mixed)
 library(betareg)
-library(lmtest)
+# library(lmtest)
 # install.packages("effects")
 # library(effects)
 # install.packages("investr")
@@ -37,7 +37,7 @@ library(lmtest)
 
 ### read and handle data ----
 
-# vpa estimates from the stock assessment in Japan
+# VPA estimates from the Japanese stock assessment in 2021
 vpares = get(load("data/vpa_masaba_P2021.rda"))
 
 
@@ -117,10 +117,7 @@ write.csv(model_sel_w_growth,file=savename("AICc_table_w_growth.csv"))
 mod_w_growth = get.models(dredge_w_growth,subset=1)[[1]]
 summary(mod_w_growth)
 
-
-tmp = predict(mod_w_growth,se.fit=TRUE)
-tmp$fit
-waa_preddat=waa_dat2 %>% mutate(pred=tmp$fit)
+save(mod_w_growth,file=savename("model_w_growth.rda"))
 
 ## figure weight growth ----
 
@@ -136,11 +133,14 @@ newdata_wg = expand.grid(Weight_prev=seq(min(waa_dat2$Weight_prev)*1,max(waa_dat
 newdata_wg = newdata_wg %>% mutate(Weight=predict(mod_w_growth,newdata=newdata_wg))
 
 (g_wg = ggplot(data=NULL,aes(x=Weight_prev,y=Weight))+
-  geom_point(data=waa_dat2,aes(colour=Number_prev),size=point_size)+xlim(0,NA)+ylim(0,NA)+
+  geom_point(data=waa_dat2,aes(colour=Number_prev),size=point_size)+
+    # xlim(0,NA)+ylim(0,NA)+
     geom_path(data=newdata_wg,aes(colour=Number_prev,group=Number_prev),size=path_size)+
-   scale_colour_gradient(low="deepskyblue",high="sienna1",name="Abundance")+
+   scale_colour_gradient(low="deepskyblue",high="sienna1",name="Abund")+
    theme_bw(base_size=base_size)+
-    xlab("Weight in year t-1")+ylab("Weight in year t")
+    xlab("Weight in year t-1")+ylab("Weight in year t")+
+  expand_limits(x = 0, y = 0)+
+    scale_x_continuous(expand = c(0.02, 0.02)) + scale_y_continuous(expand = c(0.02, 0.02))
 )
 
 ggsave(g_wg,filename=savename("weight_growth.png"),dpi=600,height=100,width=150,unit="mm")
@@ -171,6 +171,9 @@ write.csv(model_sel_w0,file=savename("AICc_table_w0.csv"))
 mod_w0 = get.models(dredge_w0,subset=1)[[1]]
 summary(mod_w0)
 
+
+## figure weight at age 0 ----
+
 newdata_w0 = expand.grid(Number_prev=exp(seq(log(min(w0_dat$Number_prev)),log(max(w0_dat$Number_prev)),length=200))) %>%
   as.data.frame()
 
@@ -181,18 +184,203 @@ newdata_w0 = newdata_w0 %>% mutate(Weight=tmp$fit,SE=tmp$se.fit) %>%
 
 (g_w0 = ggplot(data=NULL,aes(y=Weight,x=Number_prev))+
     geom_ribbon(data=newdata_w0,aes(ymax=Upper,ymin=Lower),alpha=0.4)+
-    geom_point(data=w0_dat,size=point_size)+ylim(0,NA)+
+    geom_point(data=w0_dat,size=point_size)+
+    # ylim(0,NA)+
     geom_path(data=newdata_w0,size=path_size)+
     # scale_colour_gradient(low="deepskyblue",high="sienna1",name="Abundance")+
     theme_bw(base_size=base_size)+
     ylab("Weight at age 0")+xlab("Abundance (billion)")+
-    scale_x_log10()
+    scale_x_log10()+
+    expand_limits(y = 0)+
+    scale_y_continuous(expand = c(0.02, 0.02))
 )
 
-save(g_w0,file=savename("weight_age0_graph.rda"))
+save(mod_w_growth,file=savename("model_w_growth.rda"))
+save(mod_w0,file=savename("model_w_age0.rda"))
 
+save(g_w0,file=savename("weight_age0_graph.rda"))
 ggsave(g_w0,filename=savename("weight_age0.png"),dpi=600,height=100,width=150,unit="mm")
 
+## maturity modeling ----
+
+# tranform [0,1] to (0,1)
+# https://stats.stackexchange.com/questions/48028/beta-regression-of-proportion-data-including-1-and-0
+vpares$input$dat$maa
+maa_dat = waa_dat %>% 
+  filter(Age>0 & Age<4) %>%
+  filter(Year > min(Year)) %>%
+  mutate(Maturity_c = (Maturity*(n()-1)+0.5)/n(),Age=factor(Age)) 
+
+nrow(maa_dat)
+
+full_mat = betareg(Maturity_c~Weight*Number_prev+Weight*log(Number_prev)+Age*Number_prev+Age*log(Number_prev),data=maa_dat,link="logit",type="BC")
+
+dredge_mat = dredge(full_mat, fixed="Age",
+                    subset=!("Number_prev" && "log(Number_prev)") & !("Age" && "Weight"))
+
+head(dredge_mat,100) 
+# AICc(mod_mat)
+model_sel_mat = model.sel(dredge_mat,beta="sd")
+write.csv(model_sel_mat,file=savename("AICc_table_maturity.csv"))
+
+mod_mat = get.models(dredge_mat,subset=1)[[1]]
+summary(mod_mat)
+
+newdata_mat = expand.grid(Age=unique(maa_dat$Age),
+                         Number_prev=seq(min(maa_dat$Number_prev),max(maa_dat$Number_prev),length=200)) %>%
+  as.data.frame()
+
+newdata_mat = newdata_mat %>% mutate(Maturity=predict(mod_mat,newdata=newdata_mat))
+
+temp2 = newdata_mat %>% filter(Age=="1")
+plot(temp2$Number_prev,temp2$Maturity)
+
+tmp = predict(mod_mat)
+tmp %>% summary
+temp = bind_cols(maa_dat,data.frame(predd=tmp)) %>% filter(Age=="1")
+
+plot(temp$Number_prev,temp$predd)
+
+(g_mat = ggplot(data=NULL,aes(x=Number_prev))+
+    geom_point(data=maa_dat,aes(y=Maturity,colour=Age),size=point_size)+
+    # xlim(0,NA)+ylim(0,NA)+
+    geom_path(data=newdata_mat,aes(y=Maturity,colour=Age,group=Age),size=path_size)+
+    scale_colour_brewer(palette="Set1")+
+    theme_bw(base_size=base_size)+
+    # scale_x_log10()+
+    xlab("Abundance (billion)")+ylab("Maturation rate")+
+    expand_limits(x = 0, y = 0)+
+    scale_x_continuous(expand = c(0.02, 0.02)) + scale_y_continuous(expand = c(0.02, 0.02))
+)
+
+ggsave(g_mat,filename=savename("maturation.png"),dpi=600,height=100,width=150,unit="mm")
+save(g_mat,file=savename("maturation_graph.rda"))
+
+
+## generate combined figure ----
+
+g1 = gridExtra::grid.arrange(g_w0 + ggtitle("(a)"),
+                             g_wg + ggtitle("(b)"),
+                             g_mat + ggtitle("(c)"),nrow=3)
+
+ggsave(g1,filename=savename("individual_dens_effect.png"),dpi=600,unit="mm",height=240,width=150)
+save(g1,file=savename("individual_dens_effect.rda"))
+
+
+g1_wide = gridExtra::grid.arrange(g_w0 + ggtitle("(a)"),
+                             g_wg + ggtitle("(b)"),
+                             g_mat + ggtitle("(c)"),nrow=1)
+
+ggsave(g1_wide,filename=savename("individual_dens_effect_wide.png"),dpi=600,unit="mm",height=80,width=320)
+save(g1_wide,file=savename("individual_dens_effect_wide.rda"))
+
+## analyze density-independent model ----
+
+summary(mod_w0)
+mod_w0_di = update(mod_w0, formula=~.-log(Number_prev))
+summary(mod_w0_di)
+
+summary(mod_w_growth)
+mod_w_growth_di = update(mod_w_growth, formula=~.-Number_prev)
+summary(mod_w_growth_di)
+
+summary(mod_mat)
+mod_mat_di = update(mod_mat, formula=.~Age)
+summary(mod_mat_di)
+
+### draw replacement line ----
+
+# range(waa_dat$Number_prev,na.rm = TRUE)
+# 
+# model_w0 = mod_w0_di
+# model_wg = mod_w_growth_di
+# model_mat = mod_mat_di
+
+# model_w0 = mod_w0
+# model_wg = mod_w_growth
+# model_mat = mod_mat
+
+# summary(model_mat)
+
+calc_replace = function(dd) {
+  
+  if (isTRUE(dd)) {
+    model_w0 = mod_w0
+    model_wg = mod_w_growth
+    model_mat = mod_mat
+  } else {
+    model_w0 = mod_w0_di
+    model_wg = mod_w_growth_di
+    model_mat = mod_mat_di
+  }
+  
+  Rc = seq(min(vpares$naa[1,]/1000)*0.01,max(colSums(vpares$naa)/1000),length=1000)
+  
+  l = 1000
+  
+  M=0.4
+  1:length(Rc) %>% map_dfr(., function(l) {
+    r = Rc[l] # recruitment
+    n = r/(1-exp(-M))
+    Fcurrent = rowMeans(vpares$faa[,as.character(2016:2020)])
+    
+    preddata_w0=model_w0$data %>% mutate(Number_prev=n)
+    weight = as.numeric(predict(model_w0,newdata=preddata_w0[1,]))[1]
+    
+    for (j in 1:A) {
+      if (j<A) {
+        preddata_wg = model_wg$data %>% 
+          mutate(Age=j,Number_prev=n,Weight_prev=rev(weight)[1])
+        weight = c(weight,as.numeric(predict(model_wg,newdata=preddata_wg[1,]))[1])
+      } else {
+        n_A1 = r*exp(-(A-1)*M)
+        n_plus = r*exp(-A*M)/(1-exp(-M))
+        w_A1 = rev(weight)[1]
+        # w_A1 = 682.14
+        obj_f = function(x) {
+          preddata_wg = model_wg$data %>% 
+            mutate(Age=j,Number_prev=n,Weight_prev=(w_A1*n_A1+x*n_plus)/(n_A1+n_plus))
+          tmp = as.numeric(predict(model_wg,newdata=preddata_wg[1,]))[1]
+          return( (tmp-x)^2)
+        }
+        opt_w_plus = optimize(obj_f,interval=c(w_A1,2*w_A1))
+        weight=c(weight,opt_w_plus$minimum)
+      }
+    }
+    
+    preddata_mat = model_mat$model %>% 
+      mutate(Number_prev=n)
+    maturity = c(0,sort(unique(as.numeric(predict(model_mat,newdata=preddata_mat)))),rep(1,3))
+    
+    refres = ref.F(Fcurrent=Fcurrent,Pope=TRUE,max.age=100,
+                   maa=maturity,waa=weight,M=rep(M,A+1),
+                   waa.catch=weight,min.age=0,plot=FALSE)
+    spr0 = refres$spr0
+    
+    nc = sapply(0:(A-1), function(k) r*exp(-k*M))
+    nc = c(nc,n-sum(nc))
+    
+    ssb = sum(nc*weight*maturity)
+    data.frame(SSB=ssb,R=ssb/spr0)
+  }) 
+}
+
+replace_di = calc_replace(dd=FALSE)
+
+replace_dd = calc_replace(dd=TRUE)
+
+plot(replace_di$SSB,replace_di$R)
+plot(replace_dd$SSB,replace_dd$R,xlim=c(0,4000))
+
+
+
+
+cumsum(sapply(0:100, function(i) r*exp(-i*M)))
+
+?calc_steepness
+
+?get.SPR
+?ref.F
 save.image(".RData")
 
 
