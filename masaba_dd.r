@@ -40,6 +40,8 @@ library(betareg)
 # VPA estimates from the Japanese stock assessment in 2021
 vpares = get(load("data/vpa_masaba_P2021.rda"))
 
+range(colSums(vpares$ssb))
+range(colSums(vpares$ssb))/1000
 
 waa_dat = expand.grid(Age=as.numeric(rownames(vpares$naa)),
                       Year=as.numeric(colnames(vpares$naa))) %>% 
@@ -70,6 +72,17 @@ waa_prev = sapply(1:nrow(waa_dat), function(i) {
   value
 })
 
+maa_prev = sapply(1:nrow(waa_dat), function(i) {
+  if (waa_dat$Age[i]==0 | waa_dat$Year[i]==min(waa_dat$Year)) {
+    value <- NA
+  } else {
+      value <- as.numeric(
+        vpares$input$dat$maa[waa_dat$Age[i],as.character(waa_dat$Year[i]-1)])
+  }
+  value
+})
+
+
 num_prev = sapply(1:nrow(waa_dat), function(i) {
   if (waa_dat$Year[i]==min(waa_dat$Year)) {
     value <- NA
@@ -80,13 +93,50 @@ num_prev = sapply(1:nrow(waa_dat), function(i) {
   value
 })
 
+cohort_prev = sapply(1:nrow(waa_dat), function(i) {
+  if (waa_dat$Year[i]==min(waa_dat$Year)) {
+    value <- NA
+  } else {
+    if(waa_dat$Age[i]==0) {
+      value <- NA
+      } else {
+      # if (waa_dat$Age[i]<A) {
+        value <- as.numeric(vpares$naa[waa_dat$Age[i],as.character(waa_dat$Year[i]-1)])
+      # } else {
+      # }
+    }
+  }
+  value
+})
+
+cohort_plus = sapply(1:nrow(waa_dat), function(i) {
+  if (waa_dat$Year[i]==min(waa_dat$Year)) {
+    value <- NA
+  } else {
+    if(waa_dat$Age[i]==0) {
+      value <- NA
+    } else {
+      # if (waa_dat$Age[i]<A) {
+      value <- as.numeric(vpares$naa[waa_dat$Age[i],as.character(waa_dat$Year[i]-1)])
+      value <- value + as.numeric(vpares$naa[waa_dat$Age[i]+1,as.character(waa_dat$Year[i]-1)])
+      # } else {
+      # }
+    }
+  }
+  value
+})
+
+
 waa_dat = waa_dat %>%
   mutate(Weight_prev=waa_prev,
-         Number_prev=num_prev/1000) %>%
+         Maturity_prev=maa_prev,
+         Number_prev=num_prev/1000,
+         Cohort_prev=cohort_prev/1000,
+         Cohort_plus=cohort_plus/1000) %>%
   mutate(logN_prev=log(num_prev)) %>%
   mutate(YearClass=Year-Age) %>%
-  mutate(interact_norm = Weight_prev*Number_prev,
-         interact_log = Weight_prev*logN_prev) %>%
+  # mutate(interact_norm = Weight_prev*Number_prev,
+  #        interact_log = Weight_prev*logN_prev) %>%
   filter(Year<max(Year))
 
 ### modeling individual-level density dependence ----
@@ -95,17 +145,32 @@ waa_dat = waa_dat %>%
 
 waa_dat2 = na.omit(waa_dat)
 
+full_w_growth = glm(Weight~Weight_prev*log(Number_prev)+Weight_prev*log(Cohort_prev)+Weight_prev*log(Cohort_plus),
+                    data=waa_dat2,family=Gamma("identity"))
+
+
 # full_w_growth = glm(Weight~Weight_prev+Number_prev+log(Number_prev)+interact_norm+interact_log,data=waa_dat2)
 
 # using Gamma distribution due to heterogeneity in variance 
-full_w_growth = glm(Weight~Weight_prev+Number_prev+log(Number_prev)+interact_norm+interact_log,data=waa_dat2,
-                    family=Gamma("identity"))
+# full_w_growth = glm(Weight~Weight_prev+Number_prev+log(Number_prev)+interact_norm+interact_log,data=waa_dat2,
+#                     family=Gamma("identity"))
+
+# limit to log scale
+# full_w_growth = glm(Weight~Weight_prev+log(Number_prev)+interact_log,data=waa_dat2,
+#                     family=Gamma("identity"))
+
+full_w_growth = glm(Weight~Weight_prev*log(Number_prev)+Weight_prev*log(Cohort_prev)+Weight_prev*log(Cohort_plus),
+                    data=waa_dat2,family=Gamma("identity"))
+
 summary(full_w_growth)
 
-getAllTerms(full_w_growth)
+# getAllTerms(full_w_growth)
+
+plot(waa_dat2$Cohort_plus~waa_dat2$Cohort_prev,log="xy")
 
 dredge_w_growth = dredge(full_w_growth,fixed="Weight_prev",
-                         subset=!("Number_prev" && "log(Number_prev)") & !("interact_norm" && "interact_log") & !("Number_prev" && "interact_log") & !("log(Number_prev)" && "interact_norm"))
+                         subset=!("log(Number_prev)" && "log(Cohort_prev)") & 
+                           !("log(Cohort_plus)" && "log(Cohort_prev)") & !("log(Number_prev)" && "log(Cohort_plus)"))
 
 head(dredge_w_growth,100)
 
@@ -115,6 +180,13 @@ model_sel_w_growth = model.sel(dredge_w_growth,beta="sd")
 write.csv(model_sel_w_growth,file=savename("AICc_table_w_growth.csv"))
 
 mod_w_growth = get.models(dredge_w_growth,subset=1)[[1]]
+
+# if (is.na(model_sel_w_growth$interact_log[1])) {
+#   tmp = update(mod_w_growth,formula=~.-interact_log+Weight_prev:log(Number_prev))
+#   # summary(tmp)
+#   mod_w_growth <- tmp
+# }
+
 summary(mod_w_growth)
 
 save(mod_w_growth,file=savename("model_w_growth.rda"))
@@ -149,17 +221,44 @@ save(g_wg,file=savename("weight_growth_graph.rda"))
 
 ## initial weight modeling ----
 
-w0_dat = waa_dat %>% filter(Age==0 & Year>min(Year))
+w0_dat = waa_dat %>% filter(Age==0 ) 
 
+rec = as.numeric(vpares$naa[1,as.character(w0_dat$Year)])/1000
+ssb = as.numeric(colSums(vpares$ssb[,as.character(w0_dat$Year-0)]))/1000
+biom = as.numeric(colSums(vpares$baa[,as.character(w0_dat$Year-0)]))/1000
+num = as.numeric(colSums(vpares$naa[,as.character(w0_dat$Year-0)]))/1000
+
+w0_dat = w0_dat %>% 
+  mutate(Rec = rec, SSB = ssb,Biom=biom,Number=num)
 # w0_dat$Year
 # waa_dat$Year
 
-plot(Weight~Number_prev,data=w0_dat,log="x")
+plot(Weight~Number,data=w0_dat,log="x")
+plot(Weight~SSB,data=w0_dat,log="x")
+plot(Weight~Rec,data=w0_dat,log="x")
+plot(Weight~Biom,data=w0_dat,log="x")
+plot(Rec~SSB,data=w0_dat,log="xy",col=Weight)
 
-full_w0 = glm(Weight~Number_prev+log(Number_prev),data=w0_dat,family=Gamma("identity"))
+(g_tmp = ggplot(data=w0_dat,aes(x=SSB,y=Rec,colour=Weight))+
+  geom_point(size=2)+
+    scale_x_log10()+
+    scale_y_log10()+
+    scale_colour_gradient(high="darkorange",low="darkblue")
+)
+
+# cor(log(w0_dat$Rec),log(w0_dat$SSB_prev))
+# lm(Weight~log(Number_prev),data=w0_dat) %>% summary
+# lm(Weight~log(SSB_prev),data=w0_dat) %>% summary
+# lm(Weight~log(Rec),data=w0_dat) %>% summary
+# lm(Weight~log(Biom_prev),data=w0_dat) %>% summary
+
+
+# full_w0 = glm(Weight~Number_prev+log(Number_prev),data=w0_dat,family=Gamma("identity"))
+full_w0 = glm(Weight~log(Number)+log(SSB)+log(Rec),data=w0_dat,family=Gamma("identity"))
+
 summary(full_w0)
 
-dredge_w0 = dredge(full_w0,subset=!("Number_prev" && "log(Number_prev)"))
+dredge_w0 = dredge(full_w0, subset=!("log(Number)" &&"log(Rec)"))
 
 head(dredge_w0,100)
 
@@ -171,6 +270,10 @@ write.csv(model_sel_w0,file=savename("AICc_table_w0.csv"))
 mod_w0 = get.models(dredge_w0,subset=1)[[1]]
 summary(mod_w0)
 
+plot(predict(mod_w0)~w0_dat$SSB)
+
+plot(predict(mod_w0),w0_dat$Weight)
+abline(0,1)
 
 ## figure weight at age 0 ----
 
@@ -209,37 +312,104 @@ vpares$input$dat$maa
 maa_dat = waa_dat %>% 
   filter(Age>0 & Age<4) %>%
   filter(Year > min(Year)) %>%
-  mutate(Maturity_c = (Maturity*(n()-1)+0.5)/n(),Age=factor(Age)) 
+  mutate(y0 = (Maturity-Maturity_prev)/(1-Maturity_prev)) %>%
+  mutate(y = (y0*(n()-1)+0.5)/n(),Age=factor(Age)) 
+head(maa_dat)
 
-nrow(maa_dat)
+# maa_dat %>% filter(Age==3 & Maturity<1)
+# 
+# maa_dat3 = maa_dat %>% filter(Age==3) 
 
-full_mat = betareg(Maturity_c~Weight*Number_prev+Weight*log(Number_prev)+Age*Number_prev+Age*log(Number_prev),data=maa_dat,link="logit",type="BC")
+full_mat = betareg(y~Age*Weight*log(Number_prev)+Age*Weight*log(Cohort_prev)+Age*Weight*log(Cohort_plus),
+                   data=maa_dat,link="logit",type="BC")
 
-dredge_mat = dredge(full_mat, fixed="Age",
-                    subset=!("Number_prev" && "log(Number_prev)") & !("Age" && "Weight"))
+dredge_mat = dredge(full_mat,
+                    # fixed="Age",
+                    subset=!("log(Number_prev)" && "log(Cohort_prev)") & 
+                      !("log(Cohort_plus)" && "log(Cohort_prev)") & 
+                      !("log(Number_prev)" && "log(Cohort_plus)"))
+head(dredge_mat,10) 
 
-head(dredge_mat,100) 
+# nrow(maa_dat3)
+
+mod_mat = get.models(dredge_mat,subset=1)[[1]]
+summary(mod_mat)
+AICc(mod_mat)
+
+# tmp1 = bind_cols(maa_dat,pred=predict(mod_mat))
+
+# full_mat = betareg(Maturity_c~Weight*Number_prev+Weight*log(Number_prev)+Age*Number_prev+Age*log(Number_prev),data=maa_dat,link="logit",type="BC")
+# full_mat = betareg(Maturity_c~Weight*log(Number_prev)+Age*log(Number_prev),data=maa_dat,link="logit",type="BC")
+# full_mat = betareg(Maturity_c~Age*log(Number_prev)+Age*log(Cohort_prev)+Age*log(Cohort_plus),data=maa_dat,link="logit",type="BC")
+
+# full_mat = betareg(Maturity_c~Weight*Age+Age*log(Number_prev)+Age*log(Cohort_prev)+Age*log(Cohort_plus),
+#                    data=maa_dat,link="probit",type="BC")
+
+# full_mat = betareg(Maturity_c~Weight+Age*log(Number_prev)+Age*log(Cohort_prev)+Age*log(Cohort_plus),data=maa_dat,link="logit",type="BC")
+# 
+# full_mat = betareg(Maturity_c~Weight*Age+Age*Number_prev+Age*Cohort_prev+Age*Cohort_plus,data=maa_dat,link="logit",type="BC")
+# 
+# maa_dat3 = maa_dat %>% filter(Age==3)
+# maa_dat3 %>% filter(Maturity<1)
+# 
+# full_mat = betareg(Maturity_c~Weight*Number_prev+Weight*Cohort_prev+Weight*Cohort_plus,data=maa_dat3,link="probit",type="BC")
+# 
+# dredge_mat = dredge(full_mat)
+# head(dredge_mat,100) 
+# 
+# mod_mat = get.models(dredge_mat,subset=1)[[1]]
+# summary(mod_mat)
 # AICc(mod_mat)
+# 
+# tmp1 = bind_cols(maa_dat3,pred=predict(mod_mat))
+# 
+# 
+# dredge_mat = dredge(full_mat, fixed="Age",
+#                     subset=!("log(Number_prev)" && "log(Cohort_prev)") & 
+#                       !("log(Cohort_plus)" && "log(Cohort_prev)") & !("log(Number_prev)" && "log(Cohort_plus)"))
+# 
+# dredge_mat = dredge(full_mat, fixed="Age")
+# 
+# full_mat2 = betareg(Maturity_c~Weight*Number_prev+Weight*Cohort_prev+Weight*Cohort_plus,data=maa_dat3,link="logit",type="BC")
+# dredge_mat2 = dredge(full_mat2)
+# head(dredge_mat2)
+# 
+# mod_mat2 = get.models(dredge_mat2,subset=1)[[1]]
+# 
+# tmp2 = bind_cols(maa_dat3,pred=predict(mod_mat2))
+# 
+# 
+# tmp1 %>% filter(Year>2014)
+# tmp2 %>% filter(Year>2014) # logit関数でよさそう
+
+# head(dredge_mat,100) 
+# AICc(mod_mat)
+
+
 model_sel_mat = model.sel(dredge_mat,beta="sd")
 write.csv(model_sel_mat,file=savename("AICc_table_maturity.csv"))
 
 mod_mat = get.models(dredge_mat,subset=1)[[1]]
 summary(mod_mat)
+AICc(mod_mat)
+
+# bind_cols(maa_dat,pred=predict(mod_mat)) %>% View
+### figure of maturity ----
 
 newdata_mat = expand.grid(Age=unique(maa_dat$Age),
-                         Number_prev=seq(min(maa_dat$Number_prev),max(maa_dat$Number_prev),length=200)) %>%
+                         Number_prev=exp(seq(log(min(maa_dat$Number_prev)),log(max(maa_dat$Number_prev)),length=200))) %>%
   as.data.frame()
 
 newdata_mat = newdata_mat %>% mutate(Maturity=predict(mod_mat,newdata=newdata_mat))
 
-temp2 = newdata_mat %>% filter(Age=="1")
-plot(temp2$Number_prev,temp2$Maturity)
+# temp2 = newdata_mat %>% filter(Age=="1")
+# plot(temp2$Number_prev,temp2$Maturity)
 
-tmp = predict(mod_mat)
-tmp %>% summary
-temp = bind_cols(maa_dat,data.frame(predd=tmp)) %>% filter(Age=="1")
+# tmp = predict(mod_mat)
+# tmp %>% summary
+# temp = bind_cols(maa_dat,data.frame(predd=tmp)) %>% filter(Age=="1")
 
-plot(temp$Number_prev,temp$predd)
+# plot(temp$Number_prev,temp$predd)
 
 (g_mat = ggplot(data=NULL,aes(x=Number_prev))+
     geom_point(data=maa_dat,aes(y=Maturity,colour=Age),size=point_size)+
@@ -247,10 +417,11 @@ plot(temp$Number_prev,temp$predd)
     geom_path(data=newdata_mat,aes(y=Maturity,colour=Age,group=Age),size=path_size)+
     scale_colour_brewer(palette="Set1")+
     theme_bw(base_size=base_size)+
-    # scale_x_log10()+
+    scale_x_log10(expand = c(0.02, 0.02))+
     xlab("Abundance (billion)")+ylab("Maturation rate")+
-    expand_limits(x = 0, y = 0)+
-    scale_x_continuous(expand = c(0.02, 0.02)) + scale_y_continuous(expand = c(0.02, 0.02))
+    expand_limits(y = 0)+
+    # scale_x_continuous(expand = c(0.02, 0.02)) + 
+    scale_y_continuous(expand = c(0.02, 0.02))
 )
 
 ggsave(g_mat,filename=savename("maturation.png"),dpi=600,height=100,width=150,unit="mm")
@@ -276,17 +447,19 @@ save(g1_wide,file=savename("individual_dens_effect_wide.rda"))
 
 ## analyze density-independent model ----
 
-summary(mod_w0)
-mod_w0_di = update(mod_w0, formula=~.-log(Number_prev))
+summary(mod_w0)  #SSBの方が影響大きい
+mod_w0_di = update(mod_w0, formula=~1)
 summary(mod_w0_di)
 
 summary(mod_w_growth)
-mod_w_growth_di = update(mod_w_growth, formula=~.-Number_prev)
+mod_w_growth_di = update(mod_w_growth, formula=~Weight_prev)
 summary(mod_w_growth_di)
 
 summary(mod_mat)
-mod_mat_di = update(mod_mat, formula=.~Age)
+mod_mat_di = update(mod_mat, formula=~Age:Weight)
 summary(mod_mat_di)
+
+AICc(mod_mat,mod_mat_di)
 
 ### draw replacement line ----
 
@@ -302,6 +475,7 @@ summary(mod_mat_di)
 
 # summary(model_mat)
 
+
 calc_replace = function(dd) {
   
   if (isTRUE(dd)) {
@@ -314,332 +488,109 @@ calc_replace = function(dd) {
     model_mat = mod_mat_di
   }
   
-  Rc = seq(min(vpares$naa[1,]/1000)*0.01,max(colSums(vpares$naa)/1000),length=1000)
-  
-  l = 1000
-  
-  M=0.4
-  1:length(Rc) %>% map_dfr(., function(l) {
+  Rc = seq(min(vpares$naa[1,]/1000)*0.01,0.5*max(as.numeric(vpares$naa[1,])/1000),length=200)
+  Fcurrent = rowMeans(vpares$faa[,as.character(2016:2020)])
+ 
+  AGEdata = data.frame()
+  SPRdata = data.frame()
+  # l=50
+  for (l in 1:length(Rc)) {
     r = Rc[l] # recruitment
-    n = r/(1-exp(-M))
-    Fcurrent = rowMeans(vpares$faa[,as.character(2016:2020)])
-    
-    preddata_w0=model_w0$data %>% mutate(Number_prev=n)
-    weight = as.numeric(predict(model_w0,newdata=preddata_w0[1,]))[1]
-    
-    for (j in 1:A) {
-      if (j<A) {
-        preddata_wg = model_wg$data %>% 
-          mutate(Age=j,Number_prev=n,Weight_prev=rev(weight)[1])
-        weight = c(weight,as.numeric(predict(model_wg,newdata=preddata_wg[1,]))[1])
-      } else {
-        n_A1 = r*exp(-(A-1)*M)
-        n_plus = r*exp(-A*M)/(1-exp(-M))
-        w_A1 = rev(weight)[1]
-        # w_A1 = 682.14
-        obj_f = function(x) {
-          preddata_wg = model_wg$data %>% 
-            mutate(Age=j,Number_prev=n,Weight_prev=(w_A1*n_A1+x*n_plus)/(n_A1+n_plus))
-          tmp = as.numeric(predict(model_wg,newdata=preddata_wg[1,]))[1]
-          return( (tmp-x)^2)
-        }
-        opt_w_plus = optimize(obj_f,interval=c(w_A1,2*w_A1))
-        weight=c(weight,opt_w_plus$minimum)
-      }
-    }
-    
-    preddata_mat = model_mat$model %>% 
-      mutate(Number_prev=n)
-    maturity = c(0,sort(unique(as.numeric(predict(model_mat,newdata=preddata_mat)))),rep(1,3))
-    
-    refres = ref.F(Fcurrent=Fcurrent,Pope=TRUE,max.age=100,
-                   maa=maturity,waa=weight,M=rep(M,A+1),
-                   waa.catch=weight,min.age=0,plot=FALSE)
-    spr0 = refres$spr0
-    
-    nc = sapply(0:(A-1), function(k) r*exp(-k*M))
-    nc = c(nc,n-sum(nc))
-    
-    ssb = sum(nc*weight*maturity)
-    data.frame(SSB=ssb,R=ssb/spr0)
-  }) 
+    res = calc_SPR(rec=r,model_w0,model_wg,model_mat,faa=Fcurrent*0,M=0.4)
+    AGEdata = bind_rows(AGEdata,res$AGEdata %>% mutate(ID=l))
+    SPRdata = bind_rows(SPRdata,res$SPRdata %>% mutate(ID=l))
+  }
+  return(list(AGEdata=AGEdata,SPRdata=SPRdata))
 }
 
 replace_di = calc_replace(dd=FALSE)
-
 replace_dd = calc_replace(dd=TRUE)
 
-plot(replace_di$SSB,replace_di$R)
-plot(replace_dd$SSB,replace_dd$R,xlim=c(0,4000))
+replace_dat = replace_di$SPRdata %>% mutate(type="Independent") %>%
+  full_join(replace_dd$SPRdata %>% mutate(type="Dependent"))
+
+(g_replacement = ggplot(filter(replace_dat,SSB<2000),aes(x=SSB,y=R,colour=type,group=type))+
+  geom_path()
+)
 
 
-
-
-cumsum(sapply(0:100, function(i) r*exp(-i*M)))
-
-?calc_steepness
-
-?get.SPR
-?ref.F
-save.image(".RData")
-
-
-waa_dat = waa_dat %>% 
-  mutate(Maturity_c = (Maturity*(n()-1)+0.5)/n())
-waa_dat$Maturity_c
-
-vpares$input$dat$maa[c(1,5:7),]
-vpares$input$dat$maa[c(2:4),]
-waa_dat3 = waa_dat %>% filter(Age>0 & Age<4)
-
-waa_dat4 = waa_dat %>% filter(Maturity>0 & Maturity<1)
-
-
-plot(asin(waa_dat$Maturity)~waa_dat$Weight,col=waa_dat$Year)
-
-
-plot(waa_dat$Maturity~waa_dat$Weight,col=waa_dat$Year)
-plot(waa_dat$Maturity~waa_dat$Weight,col=waa_dat$Year)
-
-plot(Maturity~Weight,data=waa_dat4)
-
-dbeta(1,2,5,log=TRUE)
-?betareg
-mod10 = betareg(Maturity_c~Weight,data=waa_dat,link="logit",type="BC")
-summary(mod10)
-AIC(mod10)
-waa_dat4
-
-mod11 = betareg(Maturity_c~log(Weight),data=waa_dat,link="logit",type="BC")
-summary(mod11)
-
-mod12 = betareg(Maturity_c~Age,data=waa_dat,link="logit",type="BC")
-summary(mod12)
-
-
-AICc(mod10,mod11,mod12)
-
-waa_dat5 = waa_dat %>% filter(Year>min(Year))
-
-mod13 = betareg(Maturity_c~Weight,data=waa_dat5,link="logit",type="BC")
-summary(mod13)
-AIC(mod10)
-waa_dat4
-
-mod14 = betareg(Maturity_c~log(Weight),data=waa_dat5,link="logit",type="BC")
-summary(mod14)
-
-mod15 = betareg(Maturity_c~Age,data=waa_dat5,link="logit",type="BC")
-summary(mod15)
-
-mod16 = betareg(Maturity_c~Age+Number_prev,data=waa_dat5,link="logit",type="BC")
-summary(mod16)
-
-mod17 = betareg(Maturity_c~Age+logN_prev,data=waa_dat5,link="logit",type="BC")
-summary(mod17)
-
-
-mod18 = betareg(Maturity_c~Age*Number_prev,data=waa_dat5,link="logit",type="BC")
-summary(mod18)
-
-mod19 = betareg(Maturity_c~Age*logN_prev,data=waa_dat5,link="logit",type="BC")
-summary(mod19)
-
-
-AICc(mod13,mod14,mod15,mod16,mod17,mod18,mod19)
-
-
-w0 = as.numeric(vpares$input$dat$waa[1,])
-w0 <- w0[-c(1,length(w0))]
-
-plot(w0)
-
-unique(waa_dat2$Number_prev) %>% length()
-length(w0)
-
-plot(w0~unique(waa_dat2$Number_prev))
-
-plot(w0~unique(waa_dat2$Number_prev),log="x")
-
-# 交互作用無し
-
-AICc(mod10,mod11)
-
-vpares$input$dat$maa
-
-
-
-summary(mod10)
-AIC(mod10)
-
-
-waa_dat
-
-hist(waa_dat2$logN_prev)
-
-obj_fun <- function(x) {
-  w_inf = exp(x[1])
-  k = exp(x[2])
-  alpha = w_inf*(1-exp(-k))
-  rho=exp(-k)
-  w_pred = alpha+rho*waa_dat2$Weight_prev
-  rss = sum((waa_dat2$Weight-w_pred)^2)
-  return(rss)
+obj_msy = function(x,Fcurrent,dd=FALSE,resSR,out=FALSE) {
+  if (isTRUE(dd)) {
+    model_w0 = mod_w0
+    model_wg = mod_w_growth
+    model_mat = mod_mat
+  } else {
+    model_w0 = mod_w0_di
+    model_wg = mod_w_growth_di
+    model_mat = mod_mat_di
+  }
+  tmp = calc_eq(faa=Fcurrent*x,model_w0,model_wg,model_mat,resSR=resSR)
+  if (out==FALSE) {
+    return( -tmp$EQdata$SY[1] )
+  } else {
+    return( tmp )
+  }
 }
 
-plot(Weight~Weight_prev,data=waa_dat2)
+msy_dd = optimize(obj_msy,interval=c(0.01,10),Fcurrent=Fcurrent,dd=TRUE,resSR=resBH)
+temp = obj_msy(msy_dd$minimum,Fcurrent=Fcurrent,dd=TRUE,resSR=resBH,out=TRUE)
+temp$EQdata
+temp$EQdata
+shape = MASS::gamma.shape(mod_w0_di)
+shape$alpha
+mean=as.numeric(predict(mod_w0_di)[1])
+tmp = rgamma(100000,shape=shape$alpha,scale=mean/shape$alpha)
+hist(tmp)
+summary(tmp)
 
-summary(glm(Weight~Weight_prev,data=waa_dat2))
+hist(1/tmp)
+summary(1/tmp)
 
-obj_fun(x)
+mean(1/tmp)/(1/mean)
+summary(mod_w0_di)
 
-opt = optim(x,obj_fun)
-opt$par[1] %>% exp
-opt$par[2] %>% exp
+resBH$pred
+resHS$pred
+g_BH = SRplot_gg(resBH)
 
-# res_ysdata = get.SPR(vpares)
-# res_ysdata$ysdata
-# 
-# dat = data.frame(Year =as.numeric(colnames(vpares$naa)),
-#                  R=as.numeric(vpares$naa[1,])/1000,
-#                  N = as.numeric(colSums(vpares$naa[-1,]))/1000,
-#                  B=as.numeric(colSums(vpares$baa[-1,]))/1000,
-#                  SSB=as.numeric(colSums(vpares$ssb[]))/1000,
-#                  catch=as.numeric(colSums(vpares$input$dat$caa[-1,]*vpares$input$dat$waa[-1,]))/1000)
-# 
-# 
-# dat = dat %>% bind_cols(res_ysdata$ysdata)
-# 
-# dat = dat %>% filter(Year < max(Year)) %>% 
-#   mutate(F = -log(SPR/SPR0)) %>%
-#   mutate(Weight_ypr = YPR/(1-exp(-F)))
-# 
-# plot(dat$SPR0 ~ dat$N)
-# plot(dat$Weight_ypr ~ dat$N)
-# 
-# plot(dat$SPR0 ~ dat$N,log="y")
-# plot(dat$Weight_ypr ~ dat$N,log="y")
-# 
-# plot(dat$SPR0 ~ dat$N,log="xy")
-# plot(dat$Weight_ypr ~ dat$N,log="xy")
-# 
-# summary(glm(log(dat$SPR0) ~ dat$N))
-# summary(glm(log(dat$SPR0) ~ log(dat$N)))
-# 
-# summary(glm(log(dat$Weight_ypr) ~ dat$N))
-# summary(glm(log(dat$Weight_ypr) ~ log(dat$N)))
-# 
-# 
-# plot(dat$SPR0 ~ dat$SSB,log="y")
-# plot(dat$Weight_ypr ~ dat$SSB, log="y")
-# 
-# plot(dat$SPR0 ~ dat$SSB,log="")
-# plot(dat$Weight_ypr ~ dat$SSB, log="")
-# 
-# # exp(6.74)
-# summary(glm(log(dat$SPR0) ~ dat$SSB))
-# summary(glm(log(dat$SPR0) ~ log(dat$SSB)))
-# 
-# summary(glm(log(dat$Weight_ypr) ~ dat$SSB))
-# summary(glm(log(dat$Weight_ypr) ~ log(dat$SSB)))
-# 
-# 
-# 
-# 
-# 
-# # -log(0.5)
-# 
+replace_di$SSB/replace_di$R
+cbind(replace_dd$SSB,replace_dd$SSB/replace_dd$R)[60,]
+cbind(replace_dd$SSB,replace_dd$R)[60,]
 
-# dat = data.frame(Year =as.numeric(colnames(vpares$naa)),
-#                  R=as.numeric(vpares$naa[1,])/1000,
-#                  N = as.numeric(colSums(vpares$naa[,]))/1000,
-#                  B=as.numeric(colSums(vpares$baa[,]))/1000,
-#                  SSB=as.numeric(colSums(vpares$ssb[]))/1000,
-#                  w0=as.numeric(vpares$input$dat$waa[1,]),
-#                  catch=as.numeric(colSums(vpares$input$dat$caa[]*vpares$input$dat$waa[]))/1000,
-#                  catch_number=as.numeric(colSums(vpares$input$dat$caa[]))/1000) %>%
-#   mutate(F=-log(1-(catch_number/N)*exp(-0.4/2))) %>%
-#   mutate(S = exp(-F-0.4)) %>% filter(Year < max(Year))
-# 
-# 
-# nyear = nrow(dat)
-# 
-# y = dat$B-dat$w0*dat$R
-# 
-# dat$y <- c(y[-1],NA)
-# dat$log_y = log(dat$y)
-# 
-# data=dat
-# 
-# x = rep(0.,3)
-# 
-# obj_fun = function(x,data=dat,dens_effect=TRUE,logN=TRUE,out=FALSE) {
-#   nyear = nrow(dat)
-#   N = data$N
-#   B = data$B
-#   y = data$B-data$w0*data$R
-#   y = y[-1]
-#   log_y= log(y)
-#   log_k = rep(x[2],nyear)
-#   if (isTRUE(dens_effect)) {
-#     if (isTRUE(logN)) {
-#       log_k = log_k + x[3]*log(N)
-#     } else {
-#       log_k = log_k + x[3]*N
-#     }
-#   }
-#   k = exp(log_k)
-#   w_inf = exp(x[1])
-#   alpha = w_inf*(1-exp(-k))
-#   rho = exp(-k)
-#   data = data %>% 
-#     mutate(F=-log(1-(catch_number/N)*exp(-0.4/2))) %>%
-#     mutate(S = exp(-F-0.4))
-#   S = data$S
-#   pred_y = S*alpha*N+S*rho*B
-#   pred_y = pred_y[-1]
-#   pred_logy = log(pred_y)
-#   sigma = sqrt(sum((log_y-pred_logy)^2)/length(log_y))
-#   nll = -sum(dnorm(log_y,pred_logy,sd=sigma,log=TRUE))
-#   if (out==FALSE) {
-#     return( nll )
-#   } else {
-#    return(list(y=y,pred_y=pred_y,w_inf=w_inf,k=k,alpha=alpha,rho=rho,loglik=-nll,npar=length(x))) 
-#   }
-# }
-# 
-# opt = optim(par=c(log(1000),0),obj_fun,dens_effect=FALSE,out=FALSE)
-# opt
-# tmp = obj_fun(opt$par,dens_effect=FALSE,out=TRUE)
-# tmp
+vpares$input$dat$maa
+vpares$input$dat$waa
 
-dat = data.frame(Year =as.numeric(colnames(vpares$naa)),
-                 R=as.numeric(vpares$naa[1,])/1000,
-                 N = as.numeric(colSums(vpares$naa[-1,]))/1000,
-                 B=as.numeric(colSums(vpares$baa[-1,]))/1000,
-                 SSB=as.numeric(colSums(vpares$ssb[]))/1000,
-                 catch=as.numeric(colSums(vpares$input$dat$caa[-1,]*vpares$input$dat$waa[-1,]))/1000) %>%
-  mutate(Weight = B/N,Maturity=SSB/B) %>%
-  mutate(logW = log(Weight),
-         logitM = log(Maturity/(1-Maturity))) %>%
-  mutate(t = Year-min(Year)+1,logN=log(N)) %>%
-  mutate(catch_number = as.numeric(colSums(vpares$input$dat$caa[-1,]))) %>%
-  mutate(Weight_catch = 1000*catch/catch_number) %>%
-  filter(Year < max(Year))  %>% #2019年まで
-  mutate(F = -log(1-(catch/B)*exp(-0.4/2)))
-# 
-# plot(dat$Weight_catch~dat$N)
+tmp = get.SPR(vpares)
+plot(tmp$ysdata[-52,"SPR0"]~colSums(vpares$ssb)[-52])
+
+plot(tmp$ysdata[-52,"SPR0"]~colSums(vpares$naa)[-52])
+
+plot( (colSums(vpares$ssb)[-(51:52)]/1000),(colSums(vpares$ssb)[-(51:52)]/1000)/tmp$ysdata[-c(1,52),"SPR0"])
+
+plot(replace_di$SSB,replace_di$R)
+plot(replace_dd$SSB,replace_dd$R)
+
+
 
 ### Beverton-Holt SR relationship ----
 
-SRdata=get.SRdata(vpares,years=dat$Year)
+SRdata=get.SRdata(vpares,years=waa_dat$Year)
 SRdata$SSB <- SRdata$SSB/1000
 SRdata$R <- SRdata$R/1000
+
 resHS = fit.SR(SRdata,SR="HS",AR=0,out.AR=FALSE)
 resHS$pars
 
-resBH = fit.SR(SRdata,SR="BH",AR=0,out.AR=FALSE)
+resBH = fit.SR(SRdata,SR="BH",AR=1,out.AR=FALSE)
 resBH$pars
+
+1/(resBH$pars$a/(1+resBH$pars$b*1500)^2)
+
+replace_dd
+
+g_BH = SRplot_gg(resBH)
+
+1/resHS$pars$a
 
 # predict(resBH$opt)
 
@@ -673,6 +624,102 @@ pred_BH = pred_BH %>% bind_cols(as.data.frame(tmp$fit)) %>%
 )
 
 ggsave(g_BH,filename="BH_CI.png",dpi=600,unit="mm",height=100,width=150)
+
+### calculating equilibrium ----
+
+
+
+
+calc_eq = function(dd,SR,Fmulti=1) {
+  
+  if (isTRUE(dd)) {
+    model_w0 = mod_w0
+    model_wg = mod_w_growth
+    model_mat = mod_mat
+  } else {
+    model_w0 = mod_w0_di
+    model_wg = mod_w_growth_di
+    model_mat = mod_mat_di
+  }
+  
+  if(SR=="BH") resSR=resBH
+  if(SR=="HS") resHS=resHS
+  
+  # Rc = seq(min(vpares$naa[1,]/1000)*0.01,0.5*max(as.numeric(vpares$naa[1,])/1000),length=200)
+  
+  M=0.4
+  Fcurrent = rowMeans(vpares$faa[,as.character(2016:2020)])
+  saa = Fcurrent/rev(Fcurrent)[1]
+  
+  faa = Fcurrent*Fmulti
+  
+  # l=50
+  # 1:length(Rc) %>% map_dfr(., function(l) {
+
+    # y <- 53.39
+    obj_f2 = function(y,out=FALSE) {
+      # summary(model_w0)
+      weight = y # weight at age 0
+      
+      for (j in 1:A) {
+        # if (j<A) {
+        # summary(model_wg)
+        preddata_wg = model_wg$data %>% 
+          mutate(Age=j,Number_prev=n,Weight_prev=rev(weight)[1],Cohort_prev=nc[j],Cohort_plus=sum(nc[j:(j+1)]))
+        weight = c(weight,as.numeric(predict(model_wg,newdata=preddata_wg[1,]))[1])
+        # } else {
+        #   n_A1 = r*exp(-(A-1)*M)
+        #   n_plus = r*exp(-A*M)/(1-exp(-M))
+        #   w_A1 = rev(weight)[1]
+        #   # w_A1 = 682.14
+        #   obj_f = function(x) {
+        #     preddata_wg = model_wg$data %>% 
+        #       mutate(Age=j,Number_prev=n,Weight_prev=(w_A1*n_A1+x*n_plus)/(n_A1+n_plus))
+        #     tmp = as.numeric(predict(model_wg,newdata=preddata_wg[1,]))[1]
+        #     return( (tmp-x)^2)
+        #   }
+        #   opt_w_plus = optimize(obj_f,interval=c(w_A1,2*w_A1))
+        #   weight=c(weight,opt_w_plus$minimum)
+        # }
+      }
+      # summary(model_mat)
+      preddata_mat = model_mat$model %>% 
+        mutate(Number_prev=n,Cohort_prev=nc[j],Cohort_plus=sum(nc[j:(j+1)]))
+      maturity = c(0,sort(unique(as.numeric(predict(model_mat,newdata=preddata_mat)))),rep(1,3))
+      ssb = sum(nc*weight*maturity)
+      
+      # summary(model_w0)
+      preddata_w0=model_w0$data %>% mutate(Number_prev=n,Rec=nc[1],SSB=ssb)
+      pred_w0 = as.numeric(predict(model_w0,newdata=preddata_w0[1,]))[1]
+      
+      if (out==FALSE) {
+        return( (y-pred_w0)^2 )
+      } else {
+        res = list(naa=nc,waa=weight,maa=maturity,ssb=nc*weight*maturity)
+        return( res )
+      }
+    }
+    opt2 = optimize(obj_f2,interval=c(0.1,1000))
+    # opt2$minimum
+    # opt2$objective
+    out = obj_f2(opt2$minimum,out=TRUE)
+    out
+    # out$ssb %>% sum
+    
+    refres = ref.F(Fcurrent=Fcurrent,Pope=TRUE,max.age=100,
+                   maa=out$maa,waa=out$waa,M=rep(M,A+1),
+                   waa.catch=out$waa,min.age=0,plot=FALSE)
+    spr0 = refres$spr0
+    
+    # nc = sapply(0:(A-1), function(k) r*exp(-k*M))
+    # nc = c(nc,n-sum(nc))
+    # 
+    ssb = sum(nc*weight*maturity)
+    data.frame(SPR0=spr0,SSB=ssb,R=ssb/spr0)
+  }) 
+}
+
+
 
 ### weight and maturity regression ---- 
 
