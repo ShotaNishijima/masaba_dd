@@ -27,6 +27,8 @@ library(MuMIn)
 options(na.action = "na.fail")
 library("dplyr", character.only = TRUE)
 
+# install.packages("broom.mixed")
+# install.packages("betareg")
 library(broom.mixed)
 library(betareg)
 # library(lmtest)
@@ -38,7 +40,8 @@ library(betareg)
 ### read and handle data ----
 
 # VPA estimates from the Japanese stock assessment in 2021
-vpares = get(load("data/vpa_masaba_P2021.rda"))
+# vpares = get(load("data/vpa_masaba_P2021.rda"))
+vpares = get(load("data/res_vpa_CMP.rda")) # assessment result in 2021
 
 range(colSums(vpares$ssb))
 range(colSums(vpares$ssb))/1000
@@ -159,8 +162,6 @@ full_w_growth = glm(Weight~Weight_prev*log(Number_prev)+Weight_prev*log(Cohort_p
 # full_w_growth = glm(Weight~Weight_prev+log(Number_prev)+interact_log,data=waa_dat2,
 #                     family=Gamma("identity"))
 
-full_w_growth = glm(Weight~Weight_prev*log(Number_prev)+Weight_prev*log(Cohort_prev)+Weight_prev*log(Cohort_plus),
-                    data=waa_dat2,family=Gamma("identity"))
 
 summary(full_w_growth)
 
@@ -168,18 +169,25 @@ summary(full_w_growth)
 
 plot(waa_dat2$Cohort_plus~waa_dat2$Cohort_prev,log="xy")
 
-dredge_w_growth = dredge(full_w_growth,fixed="Weight_prev",
+dredge_w_growth = dredge(full_w_growth,fixed="Weight_prev",beta="sd",
                          subset=!("log(Number_prev)" && "log(Cohort_prev)") & 
                            !("log(Cohort_plus)" && "log(Cohort_prev)") & !("log(Number_prev)" && "log(Cohort_plus)"))
 
 head(dredge_w_growth,100)
 
 save(dredge_w_growth,file=savename("dredge_w_growth.rda"))
+# model.sel(dredge_w_growth)
 
 model_sel_w_growth = model.sel(dredge_w_growth,beta="sd")
+?model.sel
+
 write.csv(model_sel_w_growth,file=savename("AICc_table_w_growth.csv"))
 
 mod_w_growth = get.models(dredge_w_growth,subset=1)[[1]]
+mod_w_growth$formula
+# Weight ~ log(Cohort_plus) + 1 + Weight_prev
+# Cohort plusが切片に影響
+summary(mod_w_growth)
 
 # if (is.na(model_sel_w_growth$interact_log[1])) {
 #   tmp = update(mod_w_growth,formula=~.-interact_log+Weight_prev:log(Number_prev))
@@ -198,22 +206,43 @@ point_size=1.5
 path_size=1.2
 
 waa_dat2$Number_prev %>% summary()
+# newdata_wg = expand.grid(Weight_prev=seq(min(waa_dat2$Weight_prev)*1,max(waa_dat2$Weight_prev)*1,length=100),
+#                          Number_prev=c(quantile(waa_dat2$Number_prev,probs=c(0.1,0.9)),mean(waa_dat2$Number_prev))) %>%
+#   as.data.frame()
+
 newdata_wg = expand.grid(Weight_prev=seq(min(waa_dat2$Weight_prev)*1,max(waa_dat2$Weight_prev)*1,length=100),
-                         Number_prev=c(quantile(waa_dat2$Number_prev,probs=c(0.1,0.9)),mean(waa_dat2$Number_prev))) %>%
+                         Cohort_plus=c(quantile(waa_dat2$Cohort_plus,probs=c(0.1,0.9)),median(waa_dat2$Cohort_plus))) %>%
   as.data.frame()
+
 
 newdata_wg = newdata_wg %>% mutate(Weight=predict(mod_w_growth,newdata=newdata_wg))
 
+# (g_wg = ggplot(data=NULL,aes(x=Weight_prev,y=Weight))+
+#   geom_point(data=waa_dat2,aes(colour=Number_prev),size=point_size)+
+#     # xlim(0,NA)+ylim(0,NA)+
+#     geom_path(data=newdata_wg,aes(colour=Number_prev,group=Number_prev),size=path_size)+
+#    scale_colour_gradient(low="deepskyblue",high="sienna1",name="Abund")+
+#    theme_bw(base_size=base_size)+
+#     xlab("Weight in year t-1")+ylab("Weight in year t")+
+#   expand_limits(x = 0, y = 0)+
+#     scale_x_continuous(expand = c(0.02, 0.02)) + scale_y_continuous(expand = c(0.02, 0.02))
+# )
+# 
+
+abel_aic <- bquote(Delta*italic(AIC[c])*'=' ~ .(value))
+ggplot(dat1, aes(x=x, y=y, color=Model)) + geom_line(size=1.3) + labs(x=label_aic)
+
 (g_wg = ggplot(data=NULL,aes(x=Weight_prev,y=Weight))+
-  geom_point(data=waa_dat2,aes(colour=Number_prev),size=point_size)+
+    geom_point(data=waa_dat2,aes(colour=log(Cohort_plus)),size=point_size)+
     # xlim(0,NA)+ylim(0,NA)+
-    geom_path(data=newdata_wg,aes(colour=Number_prev,group=Number_prev),size=path_size)+
-   scale_colour_gradient(low="deepskyblue",high="sienna1",name="Abund")+
-   theme_bw(base_size=base_size)+
-    xlab("Weight in year t-1")+ylab("Weight in year t")+
-  expand_limits(x = 0, y = 0)+
+    geom_path(data=newdata_wg,aes(colour=log(Cohort_plus),group=Cohort_plus),size=path_size)+
+    scale_colour_gradient(low="deepskyblue",high="sienna1",name=bquote(log*'('*italic(n[t]^'+')*')'))+
+    theme_bw(base_size=base_size)+
+    xlab(bquote(italic(w[t])))+ylab(bquote(italic(w[t+1])))+
+    expand_limits(x = 0, y = 0)+
     scale_x_continuous(expand = c(0.02, 0.02)) + scale_y_continuous(expand = c(0.02, 0.02))
 )
+
 
 ggsave(g_wg,filename=savename("weight_growth.png"),dpi=600,height=100,width=150,unit="mm")
 
