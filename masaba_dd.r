@@ -464,13 +464,39 @@ newdata_w0 = newdata_w0 %>% mutate(Weight=tmp$fit,SE=tmp$se.fit) %>%
 (g_w0 = ggplot(data=w0_dat,aes(x=SSB,y=Rec,colour=Weight))+
     geom_contour_filled(data=newdata_w0,aes(z=Weight,fill = ..nlevel..),alpha=0.6)+
     geom_point(size=2)+
-    scale_x_log10()+
-    scale_y_log10()+
-    scale_colour_gradient(high="darkorange",low="darkblue",name=bquote(italic(w[0])))
-  +scale_fill_gradient(high="darkorange",low="darkblue")+
+    scale_x_log10(expand = c(0.01, 0.01))+
+    scale_y_log10(expand = c(0.01, 0.01))+
+    scale_colour_gradient(high="darkorange",low="darkblue",name=bquote(italic(w[0])))+
+    scale_fill_gradient(high="darkorange",low="darkblue")+
     guides(fill="none")+
     ylab("Recruitment")+theme_bw(base_size=base_size)
 )
+
+# 
+# (g_w0 = ggplot(data=w0_dat,aes(x=SSB,y=Rec,colour=Weight))+
+#     geom_contour_filled(data=newdata_w0,aes(z=Weight),alpha=0.6)+
+#     geom_point(size=2)+
+#     scale_x_log10(expand = c(0.01, 0.01))+
+#     scale_y_log10(expand = c(0.01, 0.01))+
+#     scale_colour_gradient(high="darkorange",low="darkblue",name=bquote(italic(w[0])))+
+#     # scale_fill_gradient(high="darkorange",low="darkblue")+
+#     # guides(fill="none")+
+#     ylab("Recruitment")+theme_bw(base_size=base_size)
+# )
+# 
+
+# (g_w0 = ggplot(data=w0_dat,aes(x=SSB,y=Rec,z=Weight,colour=Weight))+
+#     geom_contour(data=newdata_w0,aes(z=Weight),alpha=0.6)+
+#     # geom_contour_filled(data=newdata_w0,aes(z=Weight,fill = ..level..),alpha=0.6)+
+#     geom_point(size=2)+
+#     scale_x_log10(expand = c(0.01, 0.01))+
+#     scale_y_log10(expand = c(0.01, 0.01))+
+#     scale_colour_gradient(high="darkorange",low="darkblue",name=bquote(italic(w[0])))+
+#     # scale_fill_gradient(high="darkorange",low="darkblue")+
+#     # guides(fill="none")+
+#     ylab("Recruitment")+theme_bw(base_size=base_size)
+# )
+
 
 ggsave(g_w0,filename=savename("weight_age0.png"),dpi=600,height=100,width=150,unit="mm")
 
