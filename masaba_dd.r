@@ -332,7 +332,7 @@ newdata_wg = expand.grid(Weight_prev=seq(min(waa_dat2$Weight_prev)*1,max(waa_dat
 
 newdata_wg = newdata_wg %>% mutate(Weight=predict(mod_w_growth,newdata=newdata_wg))
 
-newdata_wg$DF_n_plus %>% unique()
+newdata_wg$DF_N %>% unique()
 
 waa_dat2$DF_n_plus %>% hist
 waa_dat2$DF_N %>% hist
@@ -526,11 +526,19 @@ ggsave(g_w0,filename=savename("weight_age0.png"),dpi=600,height=100,width=150,un
 # tranform [0,1] to (0,1)
 # https://stats.stackexchange.com/questions/48028/beta-regression-of-proportion-data-including-1-and-0
 vpares$input$dat$maa
+
+delta_mat = function(Maturity,Maturity_prev) (Maturity-Maturity_prev)/(1-Maturity_prev)
+y_trans = function(y0,N) (y0*(N-1)+0.5)/N
+y0_trans = function(y,N) (y*N-0.5)/(N-1)
+trans_mat = function(y0,Maturity_prev) Maturity_prev+y0*(1-Maturity_prev) 
+
 maa_dat = waa_dat2 %>% 
   filter(Age>0 & Age<4) %>%
   # filter(Year > min(Year)) %>%
-  mutate(y0 = (Maturity-Maturity_prev)/(1-Maturity_prev)) %>%
-  mutate(y = (y0*(n()-1)+0.5)/n(),Age=factor(Age)) 
+  mutate(y0 = delta_mat(Maturity,Maturity_prev)) %>%
+  mutate(N = n()) %>% 
+  mutate(y = y_trans(y0,N),Age=factor(Age)) 
+
 head(maa_dat)
 
 waa_dat$Year %>% unique()
@@ -636,17 +644,19 @@ AICc(mod_mat) #-568.9695
 
 ### figure of maturity ----
 
-
 # newdata_mat = expand.grid(Age=unique(maa_dat$Age),
 #                          Number_prev=exp(seq(log(min(maa_dat$Number_prev)),log(max(maa_dat$Number_prev)),length=200))) %>%
 #   as.data.frame()
 
-newdata_mat = expand.grid(Age=unique(maa_dat$Age),
+newdata_mat = expand.grid(Age=unique(maa_dat$Age),N=unique(maa_dat$N),
                           DF_n_plus=seq(min(maa_dat$DF_n_plus),max(maa_dat$DF_n_plus),length=200)) %>%
   as.data.frame()
 
 
-newdata_mat = newdata_mat %>% mutate(y=predict(mod_mat,newdata=newdata_mat))
+newdata_mat = newdata_mat %>% mutate(y=predict(mod_mat,newdata=newdata_mat)) %>%
+  mutate(y0 = y0_trans(y,N))
+
+newdata_mat$y0 %>% range
 
 # temp2 = newdata_mat %>% filter(Age=="1")
 # plot(temp2$Number_prev,temp2$Maturity)
@@ -660,8 +670,8 @@ newdata_mat = newdata_mat %>% mutate(y=predict(mod_mat,newdata=newdata_mat))
 (g_mat = ggplot(data=NULL,aes(x=DF_n_plus))+
     geom_point(data=maa_dat,aes(y=y0,colour=Age),size=point_size)+
     # xlim(0,NA)+ylim(0,NA)+
-    geom_path(data=newdata_mat,aes(y=y,colour=Age,group=Age),size=path_size)+
-    scale_colour_brewer(palette="Set1")+
+    geom_path(data=newdata_mat,aes(y=y0,colour=Age,group=Age),size=path_size)+
+    scale_colour_brewer(palette="Dark2")+
     theme_bw(base_size=base_size)+
     # scale_x_log10(expand = c(0.02, 0.02))+
     xlab(bquote('DF('*italic(n)*'+)'))+ylab(bquote(Delta*italic(g)))+
@@ -702,10 +712,416 @@ mod_w_growth_di = update(mod_w_growth, formula=~Weight_prev)
 summary(mod_w_growth_di)
 
 summary(mod_mat)
-mod_mat_di = update(mod_mat, formula=~Age:Weight)
+mod_mat_di = update(mod_mat, formula=~Age)
 summary(mod_mat_di)
 
 AICc(mod_mat,mod_mat_di)
+
+
+###  SR relationship ----
+
+SRdata=get.SRdata(vpares,years=unique(waa_dat$Year))
+SRdata$SSB <- SRdata$SSB/1000
+SRdata$R <- SRdata$R/1000
+
+resHS = fit.SR(SRdata,SR="HS",AR=0,out.AR=FALSE)
+resHS$pars
+
+resBH = fit.SR(SRdata,SR="BH",AR=1,out.AR=FALSE)
+resBH$pars
+
+resBH0 = fit.SR(SRdata,SR="BH",AR=0,out.AR=FALSE)
+resBH0$pars
+
+1/(resBH$pars$a/(1+resBH$pars$b*1500)^2)
+
+# replace_dd
+
+(g_BH = SRplot_gg(resBH))
+(g_HS = SRplot_gg(resHS))
+
+1/resHS$pars$a
+
+# # predict(resBH$opt)
+# 
+# c(resHS$AICc,resBH$AICc)
+# 
+# # using nls() CIを求めるため
+# 
+# bh_log = function(loga,logb,x) log(exp(loga)*x)-log(1+exp(logb)*x)
+# 
+# init = list(loga=resBH$opt$par[1],logb=resBH$opt$par[2])
+# 
+# bh_res = nls(log(R/SSB)~log(exp(loga))-log(1+exp(logb)*SSB),start=init,data=SRdata)
+
+pred_HS = resHS$pred %>% as.data.frame() 
+pred_BH = resBH$pred %>% as.data.frame() 
+# tmp = predFit(bh_res,newdata=pred_BH,se.fit=TRUE, interval = "confidence", level= 0.95, adjust="none",k=100)
+# tmp$se.fit
+# tmp$fit
+# plot(tmp$fit[,3])
+# 
+# pred_BH = pred_BH %>% bind_cols(as.data.frame(tmp$fit)) %>% 
+#   mutate(pred = exp(fit)*SSB,upper=exp(upr)*SSB,lower=exp(lwr)*SSB)
+
+(g_HS = ggplot(data=NULL,aes(x=SSB))+
+    # geom_ribbon(data=pred_BH,aes(ymax=upper,ymin=lower),alpha=0.4)+
+    geom_path(data=pred_HS,aes(y=R),size=1)+
+    geom_point(data=SRdata,aes(y=R),size=2)+
+    theme_bw(base_size=12)+
+    xlab("SSB (thousand ton)")+ylab("Recruits (billion)") +
+    ggtitle("(a)")
+)
+
+ggsave(g_HS,filename=savename("HS.png"),dpi=600,unit="mm",height=100,width=150)
+
+(g_BH = ggplot(data=NULL,aes(x=SSB))+
+    # geom_ribbon(data=pred_BH,aes(ymax=upper,ymin=lower),alpha=0.4)+
+    geom_path(data=pred_BH,aes(y=R),size=1)+
+    geom_point(data=SRdata,aes(y=R),size=2)+
+    theme_bw(base_size=12)+
+    xlab("SSB (thousand ton)")+ylab("Recruits (billion)") +
+    ggtitle("(a)")
+)
+
+ggsave(g_BH,filename=savename("BH.png"),dpi=600,unit="mm",height=100,width=150)
+
+
+# Scenario A: use five years average ----
+
+# HS = function(x,a=resHS$pars["a"],b=resHS$pars["b"]) a*min(x,b)
+
+HS = function(x,a=as.numeric(resHS$pars["a"]),b=as.numeric(resHS$pars["b"])) SRF_HS(x,a,b)
+# HS(100)
+# HS2(100)
+# SRF_HS(100,)
+
+BH = function(x,a=as.numeric(resBH$pars["a"]),b=as.numeric(resBH$pars["b"])) SRF_BH(x,a,b)
+BH(100)
+
+
+Fcurrent = rowMeans(vpares$faa[,as.character(2016:2020)])
+maa_A = rowMeans(vpares$input$dat$maa[,as.character(2016:2020)])
+M_A = rowMeans(vpares$input$dat$M[,as.character(2016:2020)])
+waa_A = rowMeans(vpares$input$dat$waa[,as.character(2016:2020)])
+
+resB0_A = frasyr::calc_steepness(SR="HS",rec_pars=resHS$pars,
+                                 M=M_A,maa=maa_A,waa=waa_A,faa=Fcurrent)
+
+# resB0_A = frasyr::calc_steepness(SR="BH",rec_pars=resBH$pars,
+#                                  M=M_A,maa=maa_A,waa=waa_A,faa=Fcurrent)
+
+resB0_A
+
+
+# Scenario B: use all years average ----
+
+maa_B = rowMeans(vpares$input$dat$maa)
+M_B = rowMeans(vpares$input$dat$M)
+waa_B = rowMeans(vpares$input$dat$waa)
+
+resB0_B = frasyr::calc_steepness(SR="HS",rec_pars=resHS$pars,
+                                 M=M_B,maa=maa_B,waa=waa_B,faa=Fcurrent)
+
+# resB0_B = frasyr::calc_steepness(SR="BH",rec_pars=resBH$pars,
+#                                  M=M_B,maa=maa_B,waa=waa_B,faa=Fcurrent)
+
+res_B0 = full_join(resB0_A %>% mutate(Scenario="A"),
+                   resB0_B %>% mutate(Scenario="B"))
+res_B0
+
+1188.750/3099.903
+
+waa_B
+
+# Scenario C: density-independent model ----
+
+summary(mod_w0_di)
+waa_C = mean(predict(mod_w0_di)) # age 0 weight
+
+summary(mod_w_growth_di)
+
+for (i in 1:A) {
+  tmp = predict(mod_w_growth_di,newdata= data.frame(Weight_prev=waa_C[i]))
+  waa_C = c(waa_C,tmp)
+}
+
+cbind(waa_A,waa_B,waa_C)
+
+tmp = maa_dat %>% mutate(pred=predict(mod_mat_di)) %>%
+  group_by(Age) %>%
+  summarise(value = mean(pred)) %>%
+  mutate(age = as.numeric(Age))
+
+maa_C <- maa_B
+maa_C[names(maa_C) %in% tmp$Age] <- tmp$value
+
+cbind(maa_A,maa_B,maa_C)
+M_C <- M_B
+
+resB0_C = frasyr::calc_steepness(SR="HS",rec_pars=resHS$pars,
+                                 M=M_C,maa=maa_C,waa=waa_C,faa=Fcurrent)
+
+# resB0_C = frasyr::calc_steepness(SR="BH",rec_pars=resBH$pars,
+#                                  M=M_C,maa=maa_C,waa=waa_C,faa=Fcurrent)
+
+res_B0 = res_B0 %>% full_join(.,
+                   resB0_C %>% mutate(Scenario="C"))
+res_B0
+
+
+# Scenario D: density-dependent model ----
+
+source("~/git/masaba_dd/source.R")
+
+model_mat = mod_mat
+model_w0 = mod_w0
+model_w_growth = mod_w_growth
+
+colnames(waa_dat2)
+
+waa_dat_summary = waa_dat2 %>% 
+  dplyr::select(Age,
+                # Number_prev,Cohort_prev,Cohort_plus,
+                logN_mean,logn_mean,logn_plus_mean,
+                logN_sd,logn_sd,logn_plus_sd) %>%
+  distinct()
+
+maa_dat_summary = maa_dat %>% 
+  dplyr::select(Age,N,
+                # Number_prev,Cohort_prev,Cohort_plus,
+                logN_mean,logn_mean,logn_plus_mean,
+                logN_sd,logn_sd,logn_plus_sd) %>%
+  distinct()
+
+
+# ssb = seq(0.1, max(res_B0$SB0),length=2000)
+# 
+# s = ssb[i]
+# s = 1000
+# 
+# rm(x)
+# 
+# x = 1
+# 
+# calc_rel_naa(faa=Fcurrent)
+
+obj_fun = function(x,s,SR="HS",out=FALSE) {
+  
+  if (SR=="BH") r = BH(s) else  r = HS(s)
+
+  
+  tmp = calc_rel_naa(faa=Fcurrent*x)
+  naa = r*tmp
+  N = sum(naa)
+  
+  waa = as.numeric(predict(model_w0,newdata=data.frame(SSB=s,Rec=r)))
+  
+  waa_dat_tmp = waa_dat_summary %>%
+    mutate(Number_prev = N,Cohort_prev=naa[-length(naa)],Cohort_plus = naa[-length(naa)]+naa[-1]) %>%
+    mutate(DF_N = (log(Number_prev)-logN_mean)/logN_sd,
+           DF_n = (log(Cohort_prev)-logn_mean)/logn_sd,
+           DF_n_plus = (log(Cohort_plus)-logn_mean)/logn_sd)
+  
+  
+  for (j in 1:A) {
+    waa = c(waa,as.numeric(predict(model_w_growth,newdata=waa_dat_tmp[j,] %>% mutate(Weight_prev=waa[j]))))
+  }
+  
+  maa = c(0)
+  maa_dat_tmp = maa_dat_summary %>%
+    mutate(Number_prev = sum(naa),
+           Cohort_prev=naa[1:3], #0~3歳
+           Cohort_plus = naa[1:3]+naa[2:4] #0~3歳+1~4歳
+    ) %>%
+    mutate(DF_N = (log(Number_prev)-logN_mean)/logN_sd,
+           DF_n = (log(Cohort_prev)-logn_mean)/logn_sd,
+           DF_n_plus = (log(Cohort_plus)-logn_mean)/logn_sd)
+  
+  
+  for (j in 1:A) {
+    if (j<4) {
+      y_tmp = as.numeric(predict(model_mat,newdata=maa_dat_tmp[j,]))
+      y0_tmp = y0_trans(y_tmp,unique(maa_dat$N))
+      mat_tmp = as.numeric(trans_mat(y0_tmp,maa[j]))
+      maa = c(maa,mat_tmp)
+    } else {
+      maa = c(maa,1)
+    }
+  }
+  
+  ssb_x = sum(naa*waa*maa)
+  diff = ((s-ssb_x)/s)^2
+  
+  if (out==FALSE) return(diff) 
+  if (out==TRUE) return(list(naa=naa,waa=waa,maa=maa,faa=Fcurrent*x)) 
+}
+
+ssb = seq(0.1, max(res_B0$SB0),length=200)
+
+dd_eq = data.frame()
+# Fmulti = 0
+# i = 30
+for (i in 1:length(ssb)) {
+  print(i)
+  opt = optimize(obj_fun,c(0,1000),s=ssb[i])
+  # as.data.frame(opt)
+  
+  Fmulti = ifelse(opt$objective < 0.001 & opt$minimum > 0.001,opt$minimum,0)
+  out = obj_fun(x=Fmulti,s=ssb[i],out=TRUE)
+  out = as.data.frame(out)
+  
+  res_refF = frasyr::ref.F(Fcurrent=out$faa,Pope=TRUE,max.age=100,
+                           maa=out$maa,waa=out$waa,M=rep(0.4,A+1),
+                           waa.catch=out$waa,min.age=0,plot=FALSE,pSPR=0,F.range=1)
+  yprspr = res_refF$ypr.spr[1,c("ypr","pspr")]
+  SY = as.numeric(yprspr[1]*out$naa[1])
+  SPR0 =as.numeric(res_refF$spr0)
+  
+  Biomass = sum(out$naa*out$waa)
+  SSB = sum(out$naa*out$maa*out$waa)
+  Rec = out$naa[1]
+  
+  dd_eq = dd_eq %>% bind_rows(., 
+                              data.frame(Fmulti=Fmulti,Biomass=Biomass,SSB=SSB,Rec=Rec,Yield=SY,SPR0 = SPR0)
+  )
+  
+  if (Fmulti==0) break
+}
+
+plot(dd_eq$SSB/dd_eq$SPR0~dd_eq$SSB)
+plot(dd_eq$Yield~dd_eq$SSB)
+
+ssb_l = dd_eq$SSB[which.max(dd_eq$Yield)-1]
+ssb_u = dd_eq$SSB[which.max(dd_eq$Yield)+1]
+
+# resHS$pars
+
+obj_MSY = function(xx,Out=FALSE) {
+  opt = optimize(obj_fun,c(0,1000),s=xx)
+  # as.data.frame(opt)
+  
+  Fmulti = ifelse(opt$objective < 0.001,opt$minimum,0)
+  out = obj_fun(x=Fmulti,s=xx,out=TRUE)
+  
+  out = as.data.frame(out)
+  
+  res_refF = frasyr::ref.F(Fcurrent=out$faa,Pope=TRUE,max.age=100,
+                           maa=out$maa,waa=out$waa,M=rep(0.4,A+1),
+                           waa.catch=out$waa,min.age=0,plot=FALSE,pSPR=0,F.range=1)
+  yprspr = res_refF$ypr.spr[1,c("ypr","pspr")]
+  SY = as.numeric(yprspr[1]*out$naa[1])
+  SPR0 =as.numeric(res_refF$spr0)
+  
+  Biomass = sum(out$naa*out$waa)
+  SSB = sum(out$naa*out$maa*out$waa)
+  Rec = out$naa[1]
+
+  if (Out==FALSE) return( -SY )
+  if (Out==TRUE) return (data.frame(Fmulti=Fmulti,Biomass=Biomass,SSB=SSB,Rec=Rec,Yield=SY) %>% 
+                           mutate(SPR0 = SPR0))
+}
+
+# temp = seq(ssb_l,ssb_u,length=10) %>% map_dbl(., obj_MSY)
+# 
+# obj_MSY(ssb_l)
+# 
+# obj_MSY(dd_eq$SSB[which.max(dd_eq$Yield)])
+
+msy_dd = optimize(obj_MSY, c(ssb_l,ssb_u))
+msy_dd
+resHS$pars #bと一致
+
+
+temp = obj_MSY(msy_dd$minimum,Out=TRUE) %>%
+  rename(Fmsy2F=Fmulti,Bmsy=Biomass,SBmsy=SSB,Rmsy=Rec,MSY=Yield) %>%
+  mutate(Scenario="D",SPRmsy=SBmsy/Rmsy)
+
+temp = temp %>%  bind_cols(filter(dd_eq,Fmulti==0) %>%
+              rename(B0=Biomass,SB0=SSB,R0=Rec) %>% 
+              dplyr::select(B0,SB0,R0)
+            ) %>% 
+  mutate(h = 1-SBmsy/SB0)
+
+res_B0 = res_B0 %>% full_join(temp)
+
+res_B0msy = res_B0 %>% mutate(SBmsy2SB0 = SBmsy/SB0) %>%
+  dplyr::select(Scenario,everything())
+
+write.csv(res_B0msy,file=savename("res_B0msy.csv"))
+
+
+### calculating sustainable yield and spawner per spawner
+
+# waa = waa_A
+# maa = maa_A
+
+obj_fun_di = function(x,s,waa,maa,SR="HS",out=FALSE) {
+  
+  if (SR=="BH") r = BH(s) else  r = HS(s)
+
+  tmp = calc_rel_naa(faa=Fcurrent*x)
+  naa = r*tmp
+  # N = sum(naa)
+
+  ssb_x = sum(naa*waa*maa)
+  diff = (s-ssb_x)/s)^2
+  
+  if (out==FALSE) return(diff) 
+  if (out==TRUE) return(list(naa=naa,waa=waa,maa=maa,faa=Fcurrent*x)) 
+}
+
+
+# scenario A 
+
+eqdat_A <- data.frame()
+
+i=10
+
+for (i in 1:length(ssb)) {
+  print(i)
+  opt = optimize(obj_fun_di,c(0,1000),s=ssb[i],waa=waa_A,maa=maa_B)
+  # as.data.frame(opt)
+  
+  Fmulti = ifelse(opt$objective < 0.001,opt$minimum,0)
+  out = obj_fun_di(x=Fmulti,s=ssb[i],waa=waa_A,maa=maa_B,out=TRUE)
+  out = as.data.frame(out)
+  
+  res_refF = frasyr::ref.F(Fcurrent=out$faa,Pope=TRUE,max.age=100,
+                           maa=out$maa,waa=out$waa,M=rep(0.4,A+1),
+                           waa.catch=out$waa,min.age=0,plot=FALSE,pSPR=0,F.range=1)
+  
+  yprspr = res_refF$ypr.spr[1,c("ypr","pspr")]
+  SY = as.numeric(yprspr[1]*out$naa[1])
+  SPR =as.numeric(res_refF$spr0*yprspr[2]/100)
+  
+  Biomass = sum(out$naa*out$waa)
+  SSB = sum(out$naa*out$maa*out$waa)
+  Rec = out$naa[1]
+  
+  dd_eq = dd_eq %>% bind_rows(., 
+                              data.frame(Fmulti=Fmulti,Biomass=Biomass,SSB=SSB,Rec=Rec,Yield=SY) %>% 
+                                mutate(SPR = SPR)
+  )
+  
+  if (Fmulti==0) break
+}
+
+
+i = 10
+
+ssb[i]
+
+
+plot(dd_eq$SSB,dd_eq$Rec)
+
+res_B0
+
+dd_eq %>% filter(Yield==max(Yield))
+
+res_B0
+
+summary(mod_mat)
 
 ### draw replacement line ----
 
@@ -818,58 +1234,6 @@ plot(replace_dd$SSB,replace_dd$R)
 
 
 
-### Beverton-Holt SR relationship ----
-
-SRdata=get.SRdata(vpares,years=waa_dat$Year)
-SRdata$SSB <- SRdata$SSB/1000
-SRdata$R <- SRdata$R/1000
-
-resHS = fit.SR(SRdata,SR="HS",AR=0,out.AR=FALSE)
-resHS$pars
-
-resBH = fit.SR(SRdata,SR="BH",AR=1,out.AR=FALSE)
-resBH$pars
-
-1/(resBH$pars$a/(1+resBH$pars$b*1500)^2)
-
-replace_dd
-
-g_BH = SRplot_gg(resBH)
-
-1/resHS$pars$a
-
-# predict(resBH$opt)
-
-c(resHS$AICc,resBH$AICc)
-
-# using nls() CIを求めるため
-
-bh_log = function(loga,logb,x) log(exp(loga)*x)-log(1+exp(logb)*x)
-
-init = list(loga=resBH$opt$par[1],logb=resBH$opt$par[2])
-
-bh_res = nls(log(R/SSB)~log(exp(loga))-log(1+exp(logb)*SSB),start=init,data=SRdata)
-
-pred_BH = resBH$pred %>% as.data.frame() 
-
-tmp = predFit(bh_res,newdata=pred_BH,se.fit=TRUE, interval = "confidence", level= 0.95, adjust="none",k=100)
-tmp$se.fit
-tmp$fit
-plot(tmp$fit[,3])
-
-pred_BH = pred_BH %>% bind_cols(as.data.frame(tmp$fit)) %>% 
-  mutate(pred = exp(fit)*SSB,upper=exp(upr)*SSB,lower=exp(lwr)*SSB)
-
-(g_BH = ggplot(data=NULL,aes(x=SSB))+
-    geom_ribbon(data=pred_BH,aes(ymax=upper,ymin=lower),alpha=0.4)+
-    geom_path(data=pred_BH,aes(y=pred))+
-    geom_point(data=SRdata,aes(y=R),size=2)+
-    theme_bw(base_size=12)+
-    xlab("SSB (thousand ton)")+ylab("Recruits (billion)") +
-    ggtitle("(a)")
-)
-
-ggsave(g_BH,filename="BH_CI.png",dpi=600,unit="mm",height=100,width=150)
 
 ### calculating equilibrium ----
 
