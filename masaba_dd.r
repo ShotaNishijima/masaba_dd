@@ -199,14 +199,14 @@ waa_dat3 = na.omit(waa_dat) %>% group_by(Age) %>%
          DF_n_plus = log10(Cohort_plus/n_plus_mean))
 
 
-waa_dat2$DF_N %>% hist()
-waa_dat3$DF_N %>% hist()
-
-waa_dat2$DF_n %>% hist()
-waa_dat3$DF_n %>% hist()
-
-waa_dat2$DF_n_plus %>% hist()
-waa_dat3$DF_n_plus %>% hist()
+# waa_dat2$DF_N %>% hist()
+# waa_dat3$DF_N %>% hist()
+# 
+# waa_dat2$DF_n %>% hist()
+# waa_dat3$DF_n %>% hist()
+# 
+# waa_dat2$DF_n_plus %>% hist()
+# waa_dat3$DF_n_plus %>% hist()
 
 # 0が平均となるwaa_dat2を使用
 
@@ -238,22 +238,29 @@ waa_dat2$DF_n_plus %>% summary()
 waa_dat2$DF_n_plus %>% hist()
 waa_dat2$DF_n_plus %>% exp() %>% hist()
 
-
-# full_w_growth = glm(Weight~Weight_prev*log(Number_prev)+Weight_prev*log(Cohort_prev)+Weight_prev*log(Cohort_plus),
-#                     data=waa_dat2,family=Gamma("identity"))
-
-full_w_growth = glm(Weight~Weight_prev*DF_N+Weight_prev*DF_n+Weight_prev*DF_n_plus,
+# 個体数をそのまま使うように変更(2022/04/09)
+full_w_growth = glm(Weight~Weight_prev*Number_prev+Weight_prev*Cohort_prev+Weight_prev*Cohort_plus,
                     data=waa_dat2,family=Gamma("identity"))
 
+# full_w_growth = glm(Weight~Weight_prev*DF_N+Weight_prev*DF_n+Weight_prev*DF_n_plus,
+#                     data=waa_dat2,family=Gamma("identity"))
+
 summary(full_w_growth)
+
+# (tmp_aicc = AICc(mod_w_growth)) #3461.547
 
 # getAllTerms(full_w_growth)
 
 plot(waa_dat2$Cohort_plus~waa_dat2$Cohort_prev,log="xy")
 
 dredge_w_growth = dredge(full_w_growth,fixed="Weight_prev",
-                         subset=!("DF_N" && "DF_n") & 
-                           !("DF_n_plus" && "DF_n") & !("DF_N" && "DF_n_plus"))
+                         subset=!("Number_prev" && "Cohort_prev") & 
+                           !("Cohort_plus" && "Cohort_prev") & !("Number_prev" && "Cohort_plus"))
+
+
+# dredge_w_growth = dredge(full_w_growth,fixed="Weight_prev",
+#                          subset=!("DF_N" && "DF_n") & 
+#                            !("DF_n_plus" && "DF_n") & !("DF_N" && "DF_n_plus"))
 
 
 # full_w_growth2 = glm(Weight~Weight_prev*DF_N+Weight_prev*DF_n+Weight_prev*DF_n_plus,
@@ -304,40 +311,40 @@ point_size=1.5
 path_size=1.2
 
 waa_dat2$Number_prev %>% summary()
-# newdata_wg = expand.grid(Weight_prev=seq(min(waa_dat2$Weight_prev)*1,max(waa_dat2$Weight_prev)*1,length=100),
-#                          Number_prev=c(quantile(waa_dat2$Number_prev,probs=c(0.1,0.9)),mean(waa_dat2$Number_prev))) %>%
-#   as.data.frame()
+newdata_wg = expand.grid(Weight_prev=seq(min(waa_dat2$Weight_prev)*1,max(waa_dat2$Weight_prev)*1,length=100),
+                         Number_prev=c(quantile(waa_dat2$Number_prev,probs=c(0.1,0.9)),mean(waa_dat2$Number_prev))) %>%
+  as.data.frame()
 
 # newdata_wg = expand.grid(Weight_prev=seq(min(waa_dat2$Weight_prev)*1,max(waa_dat2$Weight_prev)*1,length=100),
 #                          DF_n_plus=c(quantile(waa_dat2$DF_n_plus,probs=c(0.1,0.9)),mean(waa_dat2$DF_n_plus))) %>%
 #   as.data.frame()
 
 
-newdata_wg = expand.grid(Weight_prev=seq(min(waa_dat2$Weight_prev)*1,max(waa_dat2$Weight_prev)*1,length=100),
-                         DF_N=c(quantile(waa_dat2$DF_N,probs=c(0.1,0.9)),mean(waa_dat2$DF_N))) %>%
-  as.data.frame()
+# newdata_wg = expand.grid(Weight_prev=seq(min(waa_dat2$Weight_prev)*1,max(waa_dat2$Weight_prev)*1,length=100),
+#                          DF_N=c(quantile(waa_dat2$DF_N,probs=c(0.1,0.9)),mean(waa_dat2$DF_N))) %>%
+#   as.data.frame()
 
 
 newdata_wg = newdata_wg %>% mutate(Weight=predict(mod_w_growth,newdata=newdata_wg))
 
-newdata_wg$DF_N %>% unique()
+newdata_wg$Number_prev %>% unique()
 
-waa_dat2$DF_n_plus %>% hist
-waa_dat2$DF_N %>% hist
-waa_dat2$DF_n %>% hist
-waa_dat2$DF_n_plus %>% summary()
+# waa_dat2$DF_n_plus %>% hist
+# waa_dat2$DF_N %>% hist
+# waa_dat2$DF_n %>% hist
+# waa_dat2$DF_n_plus %>% summary()
 
-# (g_wg = ggplot(data=NULL,aes(x=Weight_prev,y=Weight))+
-#   geom_point(data=waa_dat2,aes(colour=Number_prev),size=point_size)+
-#     # xlim(0,NA)+ylim(0,NA)+
-#     geom_path(data=newdata_wg,aes(colour=Number_prev,group=Number_prev),size=path_size)+
-#    scale_colour_gradient(low="deepskyblue",high="sienna1",name="Abund")+
-#    theme_bw(base_size=base_size)+
-#     xlab("Weight in year t-1")+ylab("Weight in year t")+
-#   expand_limits(x = 0, y = 0)+
-#     scale_x_continuous(expand = c(0.02, 0.02)) + scale_y_continuous(expand = c(0.02, 0.02))
-# )
-# 
+(g_wg = ggplot(data=NULL,aes(x=Weight_prev,y=Weight))+
+  geom_point(data=waa_dat2,aes(colour=Number_prev),size=point_size)+
+    # xlim(0,NA)+ylim(0,NA)+
+    geom_path(data=newdata_wg,aes(colour=Number_prev,group=Number_prev),size=path_size)+
+   scale_colour_gradient(low="deepskyblue",high="sienna1",name=bquote(italic(N)))+
+   theme_bw(base_size=base_size)+
+        xlab(bquote(italic(w[t])))+ylab(bquote(italic(w[t+1])))+
+    expand_limits(x = 0, y = 0)+
+    scale_x_continuous(expand = c(0.02, 0.02)) + scale_y_continuous(expand = c(0.02, 0.02))
+)
+
 
 # (g_wg = ggplot(data=NULL,aes(x=Weight_prev,y=Weight))+
 #     geom_point(data=waa_dat2,aes(colour=DF_n_plus),size=point_size)+
@@ -351,18 +358,17 @@ waa_dat2$DF_n_plus %>% summary()
 #   # +geom_abline(data=NULL,aes(intercept=0,slope=1))
 # )
 
-
-(g_wg = ggplot(data=NULL,aes(x=Weight_prev,y=Weight))+
-    geom_point(data=waa_dat2,aes(colour=DF_N),size=point_size)+
-    # xlim(0,NA)+ylim(0,NA)+
-    geom_path(data=newdata_wg,aes(colour=DF_N,group=DF_N),size=path_size)+
-    scale_colour_gradient(low="deepskyblue",high="sienna1",name=bquote('DF('*italic(N)*")"))+
-    theme_bw(base_size=base_size)+
-    xlab(bquote(italic(w[t])))+ylab(bquote(italic(w[t+1])))+
-    expand_limits(x = 0, y = 0)+
-    scale_x_continuous(expand = c(0.02, 0.02)) + scale_y_continuous(expand = c(0.02, 0.02))
-  # +geom_abline(data=NULL,aes(intercept=0,slope=1))
-)
+# (g_wg = ggplot(data=NULL,aes(x=Weight_prev,y=Weight))+
+#     geom_point(data=waa_dat2,aes(colour=DF_N),size=point_size)+
+#     # xlim(0,NA)+ylim(0,NA)+
+#     geom_path(data=newdata_wg,aes(colour=DF_N,group=DF_N),size=path_size)+
+#     scale_colour_gradient(low="deepskyblue",high="sienna1",name=bquote('DF('*italic(N)*")"))+
+#     theme_bw(base_size=base_size)+
+#     xlab(bquote(italic(w[t])))+ylab(bquote(italic(w[t+1])))+
+#     expand_limits(x = 0, y = 0)+
+#     scale_x_continuous(expand = c(0.02, 0.02)) + scale_y_continuous(expand = c(0.02, 0.02))
+#   # +geom_abline(data=NULL,aes(intercept=0,slope=1))
+# )
 
 ggsave(g_wg,filename=savename("weight_growth.png"),dpi=600,height=100,width=150,unit="mm")
 
@@ -403,14 +409,19 @@ plot(Rec~SSB,data=w0_dat,log="xy",col=Weight)
 
 
 # full_w0 = glm(Weight~Number_prev+log(Number_prev),data=w0_dat,family=Gamma("identity"))
-full_w0 = glm(Weight~log(Number)+log(SSB)+log(Rec),data=w0_dat,family=Gamma("identity"))
+# full_w0 = glm(Weight~log(Number)+log(SSB)+log(Rec),data=w0_dat,family=Gamma("identity"))
 
-summary(full_w0)
+# full_w0 = glm(Weight~Number+SSB+Rec,data=w0_dat,family=Gamma("identity"))
+full_w0 = glm(Weight~Number+SSB*Rec,data=w0_dat,family=Gamma("log"))
 
-dredge_w0 = dredge(full_w0, subset=!("log(Number)" &&"log(Rec)"))
 
-head(dredge_w0,100)
+# summary(full_w0)
+# 
+# dredge_w0 = dredge(full_w0, subset=!("log(Number)" &&"log(Rec)"))
 
+
+dredge_w0 = dredge(full_w0, subset=!("Number" &&"Rec") & !("Number" &&"SSB"))
+head(dredge_w0,100) #470.9
 
 # full_w0_2 = glm(Weight~Number+SSB+Rec,data=w0_dat,family=Gamma("identity"))
 
@@ -437,40 +448,45 @@ abline(0,1)
 # newdata_w0 = expand.grid(Number_prev=exp(seq(log(min(w0_dat$Number_prev)),log(max(w0_dat$Number_prev)),length=200))) %>%
 #   as.data.frame()
 
-newdata_w0 = expand.grid(Rec=seq(min(w0_dat$Rec),max(w0_dat$Rec),length=200),
-                         SSB=seq(min(w0_dat$SSB),max(w0_dat$SSB),length=200)) %>%
+newdata_w0 = expand.grid(
+  # Rec=seq(min(w0_dat$Rec),max(w0_dat$Rec),length=200),
+                         SSB=seq(0,max(w0_dat$SSB)*1.1,length=1000)) %>%
   as.data.frame()
 
 
-tmp = predict(mod_w0,newdata=newdata_w0,se.fit=TRUE)
-
+tmp = predict(mod_w0,newdata=newdata_w0,type="response",se.fit=TRUE)
+tmp$fit
 newdata_w0 = newdata_w0 %>% mutate(Weight=tmp$fit,SE=tmp$se.fit) %>% 
   mutate(Upper=Weight+1.96*SE,Lower=Weight-1.96*SE)
 
 
-(g_w0 = ggplot(data=w0_dat,aes(x=SSB,y=Rec,colour=Weight))+
-    geom_contour_filled(data=newdata_w0,aes(z=Weight,fill = ..nlevel..),alpha=0.6)+
-    geom_point(size=2)+
-    scale_x_log10(expand = c(0.01, 0.01))+
-    scale_y_log10(expand = c(0.01, 0.01))+
-    scale_colour_gradient(high="darkorange",low="darkblue",name=bquote(italic(w[0])))+
-    scale_fill_gradient(high="darkorange",low="darkblue")+
-    guides(fill="none")+
-    ylab("Recruitment")+theme_bw(base_size=base_size)
-)
-
-# 
 # (g_w0 = ggplot(data=w0_dat,aes(x=SSB,y=Rec,colour=Weight))+
-#     geom_contour_filled(data=newdata_w0,aes(z=Weight),alpha=0.6)+
+#     geom_contour_filled(data=newdata_w0,aes(z=Weight,fill = ..nlevel..),alpha=0.6)+
 #     geom_point(size=2)+
 #     scale_x_log10(expand = c(0.01, 0.01))+
 #     scale_y_log10(expand = c(0.01, 0.01))+
 #     scale_colour_gradient(high="darkorange",low="darkblue",name=bquote(italic(w[0])))+
-#     # scale_fill_gradient(high="darkorange",low="darkblue")+
-#     # guides(fill="none")+
+#     scale_fill_gradient(high="darkorange",low="darkblue")+
+#     guides(fill="none")+
 #     ylab("Recruitment")+theme_bw(base_size=base_size)
 # )
-# 
+
+
+newdata_w0$Weight
+(g_w0 = ggplot(data=w0_dat,aes(x=SSB,y=Weight))+
+    geom_ribbon(data=newdata_w0,aes(ymax=Upper,ymin=Lower),alpha=0.5)+
+    geom_path(data=newdata_w0,size=1)+
+    geom_point(size=2)+
+    # scale_x_log10(expand = c(0.01, 0.01))+
+    # scale_y_log10(expand = c(0.01, 0.01))+
+    # scale_colour_gradient(high="darkorange",low="darkblue",name=bquote(italic(w[0])))+
+    # scale_fill_gradient(high="darkorange",low="darkblue")+
+    # guides(fill="none")+
+    ylab(bquote(italic(w[0])))+xlab("SSB (thousand ton)")+
+    theme_bw(base_size=base_size)+
+    scale_x_continuous(expand=c(0.02,0.02),limits=c(0,NA))+
+    scale_y_continuous(expand=c(0.02,0.02),limits=c(0,NA))
+)
 
 # (g_w0 = ggplot(data=w0_dat,aes(x=SSB,y=Rec,z=Weight,colour=Weight))+
 #     geom_contour(data=newdata_w0,aes(z=Weight),alpha=0.6)+
@@ -483,7 +499,6 @@ newdata_w0 = newdata_w0 %>% mutate(Weight=tmp$fit,SE=tmp$se.fit) %>%
 #     # guides(fill="none")+
 #     ylab("Recruitment")+theme_bw(base_size=base_size)
 # )
-
 
 ggsave(g_w0,filename=savename("weight_age0.png"),dpi=600,height=100,width=150,unit="mm")
 
@@ -538,20 +553,24 @@ plot(y~factor(Age),dat=maa_dat)
 # 
 # maa_dat3 = maa_dat %>% filter(Age==3) 
 
-# full_mat = betareg(y~Age*Weight*log(Number_prev)+Age*Weight*log(Cohort_prev)+Age*Weight*log(Cohort_plus),
+
+# full_mat = betareg(y~Age*Number_prev+Age*Cohort_prev+Age*Cohort_plus,
 #                    data=maa_dat,link="logit",type="BC")
+full_mat = betareg(y~Age*Number_prev+Age*Cohort_prev+Age*Cohort_plus,
+                   data=maa_dat,link="cloglog",type="BC")
+
 ?betareg
 # full_mat = betareg(y~Age*DF_N+Age*DF_n+Age*DF_n_plus,
 #                    data=maa_dat,link="logit",type="BC")
 
 ?betareg
-full_mat = betareg(y~Age*DF_N+Age*DF_n+Age*DF_n_plus,
-                   data=maa_dat,link="loglog",type="BC")
+# full_mat = betareg(y~Age*DF_N+Age*DF_n+Age*DF_n_plus,
+#                    data=maa_dat,link="loglog",type="BC")
 # loglog linkに変更(AICcが低くなる&logitだとfitが悪いように見えるため)
 
 dredge_mat = dredge(full_mat,
-                    subset=!("DF_N" && "DF_n") & 
-                      !("DF_n_plus" && "DF_n") & !("DF_N" && "DF_n_plus"))
+                    subset=!("Number_prev" && "Cohort_prev") & 
+                      !("Cohort_plus" && "Cohort_prev") & !("Number_prev" && "Cohort_plus"))
 head(dredge_mat,10) 
 
 # nrow(maa_dat3)
@@ -570,76 +589,33 @@ AICc(mod_mat)
 # 
 # mod_mat <- mod_mat_loglog
 
-# tmp1 = bind_cols(maa_dat,pred=predict(mod_mat))
-
-# full_mat = betareg(Maturity_c~Weight*Number_prev+Weight*log(Number_prev)+Age*Number_prev+Age*log(Number_prev),data=maa_dat,link="logit",type="BC")
-# full_mat = betareg(Maturity_c~Weight*log(Number_prev)+Age*log(Number_prev),data=maa_dat,link="logit",type="BC")
-# full_mat = betareg(Maturity_c~Age*log(Number_prev)+Age*log(Cohort_prev)+Age*log(Cohort_plus),data=maa_dat,link="logit",type="BC")
-
-# full_mat = betareg(Maturity_c~Weight*Age+Age*log(Number_prev)+Age*log(Cohort_prev)+Age*log(Cohort_plus),
-#                    data=maa_dat,link="probit",type="BC")
-
-# full_mat = betareg(Maturity_c~Weight+Age*log(Number_prev)+Age*log(Cohort_prev)+Age*log(Cohort_plus),data=maa_dat,link="logit",type="BC")
-# 
-# full_mat = betareg(Maturity_c~Weight*Age+Age*Number_prev+Age*Cohort_prev+Age*Cohort_plus,data=maa_dat,link="logit",type="BC")
-# 
-# maa_dat3 = maa_dat %>% filter(Age==3)
-# maa_dat3 %>% filter(Maturity<1)
-# 
-# full_mat = betareg(Maturity_c~Weight*Number_prev+Weight*Cohort_prev+Weight*Cohort_plus,data=maa_dat3,link="probit",type="BC")
-# 
-# dredge_mat = dredge(full_mat)
-# head(dredge_mat,100) 
-# 
-# mod_mat = get.models(dredge_mat,subset=1)[[1]]
-# summary(mod_mat)
-# AICc(mod_mat)
-# 
-# tmp1 = bind_cols(maa_dat3,pred=predict(mod_mat))
-# 
-# 
-# dredge_mat = dredge(full_mat, fixed="Age",
-#                     subset=!("log(Number_prev)" && "log(Cohort_prev)") & 
-#                       !("log(Cohort_plus)" && "log(Cohort_prev)") & !("log(Number_prev)" && "log(Cohort_plus)"))
-# 
-# dredge_mat = dredge(full_mat, fixed="Age")
-# 
-# full_mat2 = betareg(Maturity_c~Weight*Number_prev+Weight*Cohort_prev+Weight*Cohort_plus,data=maa_dat3,link="logit",type="BC")
-# dredge_mat2 = dredge(full_mat2)
-# head(dredge_mat2)
-# 
-# mod_mat2 = get.models(dredge_mat2,subset=1)[[1]]
-# 
-# tmp2 = bind_cols(maa_dat3,pred=predict(mod_mat2))
-# 
-# 
-# tmp1 %>% filter(Year>2014)
-# tmp2 %>% filter(Year>2014) # logit関数でよさそう
-
-# head(dredge_mat,100) 
-# AICc(mod_mat)
-
 
 model_sel_mat = model.sel(dredge_mat,beta="sd")
 write.csv(model_sel_mat,file=savename("AICc_table_maturity.csv"))
 
 mod_mat = get.models(dredge_mat,subset=1)[[1]]
 summary(mod_mat)
-AICc(mod_mat) #-579.5635
+AICc(mod_mat) #-608
 
 # bind_cols(maa_dat,pred=predict(mod_mat)) %>% View
 
 ### figure of maturity ----
 
-# newdata_mat = expand.grid(Age=unique(maa_dat$Age),
-#                          Number_prev=exp(seq(log(min(maa_dat$Number_prev)),log(max(maa_dat$Number_prev)),length=200))) %>%
-#   as.data.frame()
-
 newdata_mat = expand.grid(Age=unique(maa_dat$Age),N=unique(maa_dat$N),
-                          DF_n_plus=seq(min(maa_dat$DF_n_plus),max(maa_dat$DF_n_plus),length=200)) %>%
+                         Cohort_plus=seq(min(maa_dat$Cohort_plus),max(maa_dat$Cohort_plus),length=1000)) %>%
   as.data.frame()
 
+# newdata_mat = expand.grid(Age=unique(maa_dat$Age),N=unique(maa_dat$N),
+#                           DF_n_plus=seq(min(maa_dat$DF_n_plus),max(maa_dat$DF_n_plus),length=200)) %>%
+#   as.data.frame()
 
+
+?predict.betareg
+
+tmp = predict(mod_mat,newdata=newdata_mat)
+tmp
+tmp2 = predict(mod_mat,newdata=newdata_mat,type="quantile",at=c(0.05,0.95))
+tmp2
 newdata_mat = newdata_mat %>% mutate(y=predict(mod_mat,newdata=newdata_mat)) %>%
   mutate(y0 = y0_trans(y,N))
 
@@ -654,16 +630,17 @@ newdata_mat$y0 %>% range
 
 # plot(temp$Number_prev,temp$predd)
 
-(g_mat = ggplot(data=NULL,aes(x=DF_n_plus))+
+(g_mat = ggplot(data=NULL,aes(x=Cohort_plus))+
     geom_point(data=maa_dat,aes(y=y0,colour=Age),size=point_size)+
     # xlim(0,NA)+ylim(0,NA)+
     geom_path(data=newdata_mat,aes(y=y0,colour=Age,group=Age),size=path_size)+
     scale_colour_brewer(palette="Dark2")+
     theme_bw(base_size=base_size)+
     # scale_x_log10(expand = c(0.02, 0.02))+
-    xlab(bquote('DF('*italic(n)*'+)'))+ylab(bquote(Delta*italic(g)))+
+    xlab(bquote(italic(n)*'+'))+ylab(bquote(Delta*italic(g)))+
     expand_limits(y = 0)+
-    # scale_x_continuous(expand = c(0.02, 0.02)) + 
+    # scale_x_log10(expand = c(0.02, 0.02)) +
+    scale_x_continuous(expand = c(0.02, 0.02)) +
     scale_y_continuous(expand = c(0.02, 0.02))
 )
 
@@ -742,13 +719,13 @@ c(resHS$AICc,resBH$AICc)
 # using nls() CIを求めるため
 
 
-bh_log = function(loga,logb,x) log(exp(loga)*x)-log(1+exp(logb)*x)
-
-hs = function(loga,transb,x) {
-  a = exp(loga)
-  b = min(SRdata$SSB) + (max(SRdata$SSB)-min(SRdata$SSB))/(1+exp(-transb))
-  return( a*min(b,x) )
-}
+# bh_log = function(loga,logb,x) log(exp(loga)*x)-log(1+exp(logb)*x)
+# 
+# hs = function(loga,transb,x) {
+#   a = exp(loga)
+#   b = min(SRdata$SSB) + (max(SRdata$SSB)-min(SRdata$SSB))/(1+exp(-transb))
+#   return( a*min(b,x) )
+# }
 
 # init = list(loga=resBH$opt$par[1],logb=resBH$opt$par[2])
 # bh_res = nls(log(R/SSB)~log(exp(loga))-log(1+exp(logb)*SSB),start=init,data=SRdata)
@@ -809,11 +786,11 @@ maa_A = rowMeans(vpares$input$dat$maa[,as.character(2016:2020)])
 M_A = rowMeans(vpares$input$dat$M[,as.character(2016:2020)])
 waa_A = rowMeans(vpares$input$dat$waa[,as.character(2016:2020)])
 
-resB0_A = frasyr::calc_steepness(SR="HS",rec_pars=resHS$pars,
-                                 M=M_A,maa=maa_A,waa=waa_A,faa=Fcurrent)
-
-# resB0_A = frasyr::calc_steepness(SR="BH",rec_pars=resBH$pars,
+# resB0_A = frasyr::calc_steepness(SR="HS",rec_pars=resHS$pars,
 #                                  M=M_A,maa=maa_A,waa=waa_A,faa=Fcurrent)
+
+resB0_A = frasyr::calc_steepness(SR="BH",rec_pars=resBH$pars,
+                                 M=M_A,maa=maa_A,waa=waa_A,faa=Fcurrent)
 
 resB0_A
 
@@ -824,11 +801,11 @@ maa_B = rowMeans(vpares$input$dat$maa)
 M_B = rowMeans(vpares$input$dat$M)
 waa_B = rowMeans(vpares$input$dat$waa)
 
-resB0_B = frasyr::calc_steepness(SR="HS",rec_pars=resHS$pars,
-                                 M=M_B,maa=maa_B,waa=waa_B,faa=Fcurrent)
-
-# resB0_B = frasyr::calc_steepness(SR="BH",rec_pars=resBH$pars,
+# resB0_B = frasyr::calc_steepness(SR="HS",rec_pars=resHS$pars,
 #                                  M=M_B,maa=maa_B,waa=waa_B,faa=Fcurrent)
+
+resB0_B = frasyr::calc_steepness(SR="BH",rec_pars=resBH$pars,
+                                 M=M_B,maa=maa_B,waa=waa_B,faa=Fcurrent)
 
 res_B0 = full_join(resB0_A %>% mutate(Scenario="A"),
                    resB0_B %>% mutate(Scenario="B"))
@@ -836,12 +813,11 @@ res_B0
 
 1188.750/3099.903
 
-waa_B
 
 # Scenario C: density-independent model ----
 
 summary(mod_w0_di)
-waa_C = mean(predict(mod_w0_di)) # age 0 weight
+waa_C = mean(predict(mod_w0_di,type="response")) # age 0 weight
 
 summary(mod_w_growth_di)
 
@@ -853,21 +829,23 @@ for (i in 1:A) {
 cbind(waa_A,waa_B,waa_C)
 
 tmp = maa_dat %>% mutate(pred=predict(mod_mat_di)) %>%
+  mutate(pred=y0_trans(pred,N=nrow(maa_dat))) %>% 
   group_by(Age) %>%
   summarise(value = mean(pred)) %>%
   mutate(age = as.numeric(Age))
+pred_mat <- sapply(1:nrow(tmp), function(i) trans_mat(tmp$value[i], c(0,tmp$value[-3])[i]))
 
 maa_C <- maa_B
-maa_C[names(maa_C) %in% tmp$Age] <- tmp$value
+maa_C[names(maa_C) %in% tmp$Age] <- pred_mat
 
 cbind(maa_A,maa_B,maa_C)
 M_C <- M_B
 
-resB0_C = frasyr::calc_steepness(SR="HS",rec_pars=resHS$pars,
-                                 M=M_C,maa=maa_C,waa=waa_C,faa=Fcurrent)
-
-# resB0_C = frasyr::calc_steepness(SR="BH",rec_pars=resBH$pars,
+# resB0_C = frasyr::calc_steepness(SR="HS",rec_pars=resHS$pars,
 #                                  M=M_C,maa=maa_C,waa=waa_C,faa=Fcurrent)
+
+resB0_C = frasyr::calc_steepness(SR="BH",rec_pars=resBH$pars,
+                                 M=M_C,maa=maa_C,waa=waa_C,faa=Fcurrent)
 
 res_B0 = res_B0 %>% full_join(.,
                    resB0_C %>% mutate(Scenario="C"))
@@ -885,17 +863,19 @@ model_w_growth = mod_w_growth
 colnames(waa_dat2)
 
 waa_dat_summary = waa_dat2 %>% 
-  dplyr::select(Age,
-                # Number_prev,Cohort_prev,Cohort_plus,
-                logN_mean,logn_mean,logn_plus_mean,
-                logN_sd,logn_sd,logn_plus_sd) %>%
+  dplyr::select(Age
+                # ,Number_prev,Cohort_prev,Cohort_plus
+                # ,logN_mean,logn_mean,logn_plus_mean,
+                # logN_sd,logn_sd,logn_plus_sd
+                ) %>%
   distinct()
 
 maa_dat_summary = maa_dat %>% 
-  dplyr::select(Age,N,
-                # Number_prev,Cohort_prev,Cohort_plus,
-                logN_mean,logn_mean,logn_plus_mean,
-                logN_sd,logn_sd,logn_plus_sd) %>%
+  dplyr::select(Age,N
+                # ,Number_prev,Cohort_prev,Cohort_plus
+                # ,logN_mean,logn_mean,logn_plus_mean,
+                # logN_sd,logn_sd,logn_plus_sd
+                ) %>%
   distinct()
 
 
@@ -910,22 +890,21 @@ maa_dat_summary = maa_dat %>%
 # 
 # calc_rel_naa(faa=Fcurrent)
 
-obj_fun = function(x,s,SR="HS",out=FALSE) {
+obj_fun = function(x,s,SR="BH",out=FALSE) {
   
   if (SR=="BH") r = BH(s) else  r = HS(s)
-
   
   tmp = calc_rel_naa(faa=Fcurrent*x)
   naa = r*tmp
   N = sum(naa)
   
-  waa = as.numeric(predict(model_w0,newdata=data.frame(SSB=s,Rec=r)))
+  waa = as.numeric(predict(model_w0,newdata=data.frame(SSB=s,Rec=r),type="response"))
   
   waa_dat_tmp = waa_dat_summary %>%
-    mutate(Number_prev = N,Cohort_prev=naa[-length(naa)],Cohort_plus = naa[-length(naa)]+naa[-1]) %>%
-    mutate(DF_N = (log(Number_prev)-logN_mean)/logN_sd,
-           DF_n = (log(Cohort_prev)-logn_mean)/logn_sd,
-           DF_n_plus = (log(Cohort_plus)-logn_mean)/logn_sd)
+    mutate(Number_prev = N,Cohort_prev=naa[-length(naa)],Cohort_plus = naa[-length(naa)]+naa[-1])
+  # %>% mutate(DF_N = (log(Number_prev)-logN_mean)/logN_sd,
+  #          DF_n = (log(Cohort_prev)-logn_mean)/logn_sd,
+  #          DF_n_plus = (log(Cohort_plus)-logn_mean)/logn_sd)
   
   
   for (j in 1:A) {
@@ -937,10 +916,10 @@ obj_fun = function(x,s,SR="HS",out=FALSE) {
     mutate(Number_prev = sum(naa),
            Cohort_prev=naa[1:3], #0~3歳
            Cohort_plus = naa[1:3]+naa[2:4] #0~3歳+1~4歳
-    ) %>%
-    mutate(DF_N = (log(Number_prev)-logN_mean)/logN_sd,
-           DF_n = (log(Cohort_prev)-logn_mean)/logn_sd,
-           DF_n_plus = (log(Cohort_plus)-logn_mean)/logn_sd)
+    )
+  # %>% mutate(DF_N = (log(Number_prev)-logN_mean)/logN_sd,
+  #          DF_n = (log(Cohort_prev)-logn_mean)/logn_sd,
+  #          DF_n_plus = (log(Cohort_plus)-logn_mean)/logn_sd)
   
   
   for (j in 1:A) {
@@ -1032,10 +1011,11 @@ obj_MSY = function(xx,Out=FALSE) {
 # 
 # obj_MSY(dd_eq$SSB[which.max(dd_eq$Yield)])
 
+dd_eq$Yield %>% max
+
 msy_dd = optimize(obj_MSY, c(ssb_l,ssb_u))
 msy_dd
-resHS$pars #bと一致
-
+# resHS$pars #bと一致
 
 temp = obj_MSY(msy_dd$minimum,Out=TRUE) %>%
   rename(Fmsy2F=Fmulti,Bmsy=Biomass,SBmsy=SSB,Rmsy=Rec,MSY=Yield) %>%
@@ -1086,7 +1066,7 @@ ggsave(g_mg,filename=savename("maturity-weight.png"),dpi=600,unit="mm",height=90
 # waa = waa_A
 # maa = maa_A
 
-obj_fun_di = function(x,s,waa,maa,SR="HS",out=FALSE) {
+obj_fun_di = function(x,s,waa,maa,SR="BH",out=FALSE) {
   
   if (SR=="BH") r = BH(s) else  r = HS(s)
 
@@ -1102,7 +1082,7 @@ obj_fun_di = function(x,s,waa,maa,SR="HS",out=FALSE) {
 }
 
 
-ssb = seq(0.1, max(res_B0$SB0),length=2000)
+ssb = seq(0.1, max(res_B0$SB0),length=200)
 
 eqdat <- data.frame()
 
@@ -1113,6 +1093,7 @@ eqdat <- data.frame()
 # # 
 # sapply(seq(0,2,by=0.1), function(x) obj_fun_di(x,s=0.1,waa=WAA,maa=MAA))
 
+j = 4
 
 for(j in 1:4) {
   for (i in 1:length(ssb)) {
@@ -1158,9 +1139,11 @@ for(j in 1:4) {
                                 data.frame(Fmulti=Fmulti,Biomass=Biomass,SSB=SSB,Rec=Rec,SPR0=SPR0,SPS=SPS,Yield=SY) %>%
                                   mutate(Scenario=c("A","B","C","D")[j])
     )
-    if (Fmulti==0) break
+    # if (Fmulti==0) break
   }
 }
+
+eqdat$SSB
 
 write.csv(eqdat,file=savename("eqdat.csv"))
 
@@ -1179,13 +1162,13 @@ eqdat %>% filter(Scenario=="D")
 )
 
 (g_eq3 = ggplot(data=eqdat,aes(x=SSB,y=SPS,colour=Scenario,linetype=Scenario))+
-    geom_path()
+    geom_path()+
+    scale_x_continuous(limits=c(0,2500))
 )
 
 (g_eq4 = ggplot(data=eqdat,aes(x=SSB,y=Yield,colour=Scenario,linetype=Scenario))+
     geom_path()
 )
-
 
 View(eqdat)
 
@@ -1218,6 +1201,9 @@ summary(mod_mat)
 
 # summary(model_mat)
 
+# dd = TRUE
+
+
 
 calc_replace = function(dd) {
   
@@ -1231,7 +1217,7 @@ calc_replace = function(dd) {
     model_mat = mod_mat_di
   }
   
-  Rc = seq(min(vpares$naa[1,]/1000)*0.01,0.5*max(as.numeric(vpares$naa[1,])/1000),length=200)
+  Rc = seq(min(vpares$naa[1,]/1000)*0.001,0.5*max(as.numeric(vpares$naa[1,])/1000),length=200)
   Fcurrent = rowMeans(vpares$faa[,as.character(2016:2020)])
  
   AGEdata = data.frame()
@@ -1246,8 +1232,17 @@ calc_replace = function(dd) {
   return(list(AGEdata=AGEdata,SPRdata=SPRdata))
 }
 
+
+# model=mod_mat_di
+# naa=res$AGEdata$naa
+# waa=res$AGEdata$waa
+# N=nrow(model$model)
+
 replace_di = calc_replace(dd=FALSE)
 replace_dd = calc_replace(dd=TRUE)
+
+replace_di$SPRdata$SPR %>% unique()
+replace_dd$SPRdata$SPR 
 
 replace_dat = replace_di$SPRdata %>% mutate(type="Independent") %>%
   full_join(replace_dd$SPRdata %>% mutate(type="Dependent"))
@@ -1275,7 +1270,23 @@ obj_msy = function(x,Fcurrent,dd=FALSE,resSR,out=FALSE) {
   }
 }
 
+x = 2
+faa = Fcurrent*x
+resSR = resBH
+dd = TRUE
+M = 0.4
+
+res_B0msy
+
+obj_msy(1, Fcurrent=Fcurrent,dd=TRUE,resSR=resBH)
+
+det_init = sapply(seq(0.1,10,length=100), function(x) obj_msy(x, Fcurrent=Fcurrent,dd=FALSE,resSR=resBH))
+det_init
+
+
+
 msy_dd = optimize(obj_msy,interval=c(0.01,10),Fcurrent=Fcurrent,dd=TRUE,resSR=resBH)
+msy_dd
 temp = obj_msy(msy_dd$minimum,Fcurrent=Fcurrent,dd=TRUE,resSR=resBH,out=TRUE)
 temp$EQdata
 temp$EQdata
@@ -1316,9 +1327,9 @@ plot(replace_dd$SSB,replace_dd$R)
 
 
 
+
+
 ### calculating equilibrium ----
-
-
 
 
 calc_eq = function(dd,SR,Fmulti=1) {
@@ -1334,7 +1345,7 @@ calc_eq = function(dd,SR,Fmulti=1) {
   }
   
   if(SR=="BH") resSR=resBH
-  if(SR=="HS") resHS=resHS
+  if(SR=="HS") resSR=resHS
   
   # Rc = seq(min(vpares$naa[1,]/1000)*0.01,0.5*max(as.numeric(vpares$naa[1,])/1000),length=200)
   
@@ -1407,8 +1418,8 @@ calc_eq = function(dd,SR,Fmulti=1) {
     # 
     ssb = sum(nc*weight*maturity)
     data.frame(SPR0=spr0,SSB=ssb,R=ssb/spr0)
-  }) 
-}
+  }
+})
 
 
 

@@ -14,7 +14,7 @@ calc_rel_naa = function(faa=rep(0,7),M=0.4){
 pred_w0 = function(model,Rec,SSB) {
   preddata_w0=model$data %>% 
     mutate(Rec=Rec,SSB=SSB)
-  as.numeric(predict(model,newdata=preddata_w0[1,]))[1]
+  as.numeric(predict(model,newdata=preddata_w0[1,],type="response"))[1]
 }
 
   
@@ -26,23 +26,32 @@ pred_waa = function(model,w0,naa) {
   for (j in 1:A) {
     # summary(model_wg)
     preddata_wg = model$data %>% 
-      mutate(Age=j,Weight_prev=rev(weight)[1],Cohort_prev=nc[j],Cohort_plus=sum(nc[j:(j+1)]))
+      mutate(Age=j,Weight_prev=rev(weight)[1],Cohort_prev=nc[j],Cohort_plus=sum(nc[j:(j+1)]),Number_prev=sum(nc))
     weight = c(weight,as.numeric(predict(model,newdata=preddata_wg[1,]))[1])
   }
   return( weight )
 }
 
+delta_mat = function(Maturity,Maturity_prev) (Maturity-Maturity_prev)/(1-Maturity_prev)
+y_trans = function(y0,N) (y0*(N-1)+0.5)/N
+y0_trans = function(y,N) (y*N-0.5)/(N-1)
+trans_mat = function(y0,Maturity_prev) Maturity_prev+y0*(1-Maturity_prev) 
+
 # model <- model_mat
 # summary(model)
 ## predicting maturity at age
-pred_mat = function(model,naa,waa) {
+pred_mat = function(model,naa,waa,N=nrow(model$model)) {
   nc <- as.numeric(naa)
   maturity <- c(0)
   for(j in 1:3) {
     preddata_mat = model$model %>% 
       mutate(Age=factor(j),Weight=waa[j],Cohort_prev=nc[j],Cohort_plus=sum(nc[j:(j+1)]))
     # tmp = predict(model,newdata=preddata_mat)
-    maturity = c(maturity,sort(unique(as.numeric(predict(model,newdata=preddata_mat)))))
+    tmp = sort(unique(as.numeric(predict(model,newdata=preddata_mat))))
+    tmp = y0_trans(tmp,N)
+    tmp = trans_mat(tmp,maturity[j])
+    tmp = min(1,max(0,tmp))
+    maturity = c(maturity,tmp)
   }
   maturity <- c(maturity,rep(1,3))
   return( maturity )
@@ -74,6 +83,7 @@ calc_SPR = function(rec,model_w0,model_wg,model_mat,faa=rep(0,7),M=0.4) {
   rel_naa = calc_rel_naa(faa=faa,M=M)
   naa = rec*rel_naa
   opt = opt_w0(naa,model_w0,model_wg,model_mat)
+  opt = opt %>% mutate(faa=faa)
   SSB = sum(opt$ssb)
   Res = list()
   Res$SPRdata = data.frame(R=rec,SSB=SSB,SPR=SSB/rec)
@@ -119,10 +129,13 @@ calc_eq = function(faa=rep(0,7),model_w0,model_wg,model_mat,resSR,M=0.4){
     #   }
     # }
   }
-  SPR0res = calc_SPR(R,model_w0,model_wg,model_mat,faa=faa*0,M=M)
+  
+  # SPR0res = calc_SPR(R,model_w0,model_wg,model_mat,faa=faa*0,M=M)
+  # refres$ypr.spr
+  # SPRres$AGEdata
   res1 = SPRres$SPRdata %>%
     mutate(YPR = YPR, B = sum(SPRres$AGEdata$baa), SY=SY, 
-           SPR0 = SPR0res$SPRdata$SPR) %>%
+           SPR0 =   refres$spr0) %>%
     mutate(pSPR = SPR/SPR0)
   res2 = SPRres$AGEdata %>% 
     mutate(faa=faa,M=M) %>%
