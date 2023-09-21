@@ -42,6 +42,10 @@ Type objective_function<Type>::operator() ()
   DATA_INTEGER(minAge);
   DATA_INTEGER(maxAgePlusGroup);
   DATA_INTEGER(dist_wobs); // probability distribution for observation of weight (0: lognormal, 1: gamma)
+  DATA_SCALAR(scale_number);
+
+  DATA_SCALAR(scale);
+  DATA_VECTOR(ssb);
 
   Type sd_w = exp(iota);
 
@@ -50,19 +54,28 @@ Type objective_function<Type>::operator() ()
   Type ans_w=0;
   vector<Type> wp(2);
   Type alpha_w_total, rho_w_total,beta_w0_total;
+  vector<Type> N_sum(logwaa.cols());
 
   // process model for weight
-  for(int i=0;i<logwaa.rows();i++){
-    for(int j=0;j<logwaa.cols();j++){
+  for(int j=0;j<logwaa.cols();j++){
+    N_sum(j)=Type(0.0);
+    for(int i=0;i<logwaa.rows();i++){
       waa_true(i,j)=exp(logwaa(i,j));
+      N_sum(j)+=naa(i,j)/scale_number;
     }
   }
 
   for(int j=1;j<logwaa.cols();j++){ //最初の年は除く（2年目から）
     for(int i=0;i<logwaa.rows();i++){
       alpha_w_total=alpha_w(0);
+      if(alpha_w.size()>1){
+        alpha_w_total+=alpha_w(1)*N_sum(j);
+      }
       rho_w_total=rho_w(0);
       beta_w0_total=beta_w0(0);
+      if(beta_w0.size()>1){
+        beta_w0_total+=beta_w0(1)*ssb(j)/scale;
+      }
       if(i==0){ // age 0
         logwaa_pred(i,j)=beta_w0_total;
       }else{

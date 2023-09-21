@@ -200,35 +200,67 @@ logCV_w <- log(sqrt(summary(modw)$dispersion))
 compile("gloss.cpp")
 dyn.load(dynlib("gloss"))
 
-tmbdata = list(obs_w=obs_w,naa=naa,minAge=minAge,maxAgePlusGroup=maxAgePlusGroup,
-               dist_wobs=0) # lognormal distribusion
+ssb = as.numeric(colSums(vpares$ssb))
 
-pars=list(logwaa=logwaa,beta_w0=beta_w0,alpha_w=alpha_w,rho_w=rho_w,
+tmbdata = list(obs_w=obs_w,naa=naa,minAge=minAge,maxAgePlusGroup=maxAgePlusGroup,
+               dist_wobs=0,scale_number=1000,scale=1000,ssb=ssb)
+
+tmbdata = list(obs_w=obs_w,naa=naa,minAge=minAge,maxAgePlusGroup=maxAgePlusGroup,
+               dist_wobs=1,scale_number=1000,scale=1000,ssb=ssb)
+
+
+# tmbdata = list(obs_w=obs_w,naa=naa,minAge=minAge,maxAgePlusGroup=maxAgePlusGroup,
+#                dist_wobs=1)
+# 
+# pars=list(logwaa=logwaa,beta_w0=beta_w0,alpha_w=alpha_w,rho_w=rho_w,
+#           iota=log(0.1),logCV_w=logCV_w)
+
+pars=list(logwaa=logwaa,beta_w0=beta_w0,alpha_w=c(alpha_w,0),rho_w=rho_w,
           iota=log(0.1),logCV_w=logCV_w)
 
-tmbdata$obs_w
+pars=list(logwaa=logwaa,beta_w0=c(beta_w0,0),alpha_w=c(alpha_w,0),rho_w=rho_w,
+          iota=log(0.1),logCV_w=logCV_w)
 
+
+tmbdata$obs_w
 
 obj = TMB::MakeADFun(tmbdata,pars,random="logwaa",DLL="gloss")
 
 opt <- nlminb(obj$par, obj$fn, obj$gr)
 opt
 
-rep = sdreport(obj)
+rep = sdreport(obj,bias.correct = TRUE)
 rep
 
-# 観測誤差がほぼ0になる
 
+parList = obj$env$parList()
+names(parList)
+
+parList[["beta_w0"]]
+coef(mod_w0)
+
+c(parList[["alpha_w"]],parList[["rho_w"]])
+coef(mod_w_growth)
+
+
+exp(parList[["logCV_w"]])
+
+exp(parList[["logwaa"]])
+obj$report()[["sd_w"]]
+obj$report()[["shape"]]
+
+# どちらも0.1程度
+
+matrix(rep$unbiased$value,nrow=7)
+waa_obs
+
+# 観測誤差がほぼ0になる
+# w0（0歳魚の体重）をSSBでモデリングすると観測誤差も推定できる
 
 
 
 rep$value
 
-parList = obj$env$parList()
-names(parList)
-
-exp(parList[["logwaa"]])
 waa
-obj$report()[["sd_w"]]
 
 waa_obs
