@@ -41,6 +41,7 @@ Type objective_function<Type>::operator() ()
 
   DATA_INTEGER(minAge);
   DATA_INTEGER(maxAgePlusGroup);
+  DATA_INTEGER(dist_wobs); // probability distribution for observation of weight (0: lognormal, 1: gamma)
 
   Type sd_w = exp(iota);
 
@@ -52,14 +53,20 @@ Type objective_function<Type>::operator() ()
 
   // process model for weight
   for(int i=0;i<logwaa.rows();i++){
-    for(int j=1;j<logwaa.cols();j++){ //最初の年は除く（2年目から）
+    for(int j=0;j<logwaa.cols();j++){
+      waa_true(i,j)=exp(logwaa(i,j));
+    }
+  }
+
+  for(int j=1;j<logwaa.cols();j++){ //最初の年は除く（2年目から）
+    for(int i=0;i<logwaa.rows();i++){
       alpha_w_total=alpha_w(0);
       rho_w_total=rho_w(0);
       beta_w0_total=beta_w0(0);
       if(i==0){ // age 0
         logwaa_pred(i,j)=beta_w0_total;
       }else{
-        if(j<logwaa.cols()-1){
+        if(i<logwaa.rows()-1){
           // from Brody-growth coefficient and the von-Bertalanffy weight model
           logwaa_pred(i,j)=alpha_w_total;
           logwaa_pred(i,j)+=rho_w_total*waa_true(i-1,j-1);
@@ -84,24 +91,23 @@ Type objective_function<Type>::operator() ()
     }
   }
 
-  for(int i=0;i<logwaa.rows();i++){
-    for(int j=0;j<logwaa.cols();j++){
-      waa_true(i,j)=exp(logwaa_pred(i,j));
-    }
-  }
-
   // observation model for weight
-
   int minYear=CppAD::Integer((obs_w(0,1)));
   int a, y;
   Type scale_par;
-
-  Type shape=1/pow(exp(logCV_w),Type(2.0));
+  Type shape=pow(exp(logCV_w),Type(-2.0));
+  if (dist_wobs==0) { //lognormal
+    shape=sqrt(log(Type(1.0)+pow(exp(logCV_w),Type(2.0)))); //SD for lognormal distribution
+  }
   for(int i=0;i<obs_w.rows();i++){
     a=CppAD::Integer(obs_w(i,0))-minAge;
     y=CppAD::Integer(obs_w(i,1))-minYear;
     scale_par=waa_true(a,y)/shape;
-    ans_w+=-dgamma(obs_w(i,2),shape,scale_par,true); //using Gamma distribution
+    if (dist_wobs==1){
+      ans_w+=-dgamma(obs_w(i,2),shape,scale_par,true); //using Gamma distribution
+    }else{ // lognormal
+      ans_w+=-dnorm(log(obs_w(i,2)),logwaa(a,y)-Type(0.5)*shape*shape,shape,true); //using lognormal distribution with bias correction
+    }
   }
 
   ADREPORT(waa_true);
