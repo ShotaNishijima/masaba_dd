@@ -49,13 +49,23 @@ pred_mat = function(model,naa,waa,N=nrow(model$model)) {
   nc <- as.numeric(naa)
   maturity <- c(0)
   for(j in 1:3) {
-    preddata_mat = model$model %>% 
+    if (class(model)[1] == "glmmTMB") {
+      preddata_mat = model$frame 
+    } else {
+      preddata_mat = model$model 
+    }
+    preddata_mat= preddata_mat  %>% 
       mutate(Age=factor(j),Weight=waa[j],Cohort_prev=nc[j],Cohort_plus=sum(nc[j:(j+1)]),Number_prev=sum(nc))
     # tmp = predict(model,newdata=preddata_mat)
-    tmp = sort(unique(as.numeric(predict(model,newdata=preddata_mat))))
-    tmp = y0_trans(tmp,N)
-    tmp = min(1,max(0,tmp))
-    tmp = trans_mat(tmp,rev(maturity)[1])
+    if (class(model)[1] == "glmmTMB") {
+      tmp = sort(unique(as.numeric(predict(model,newdata=preddata_mat,type="response"))))
+    } else {
+      #betareg
+      tmp = sort(unique(as.numeric(predict(model,newdata=preddata_mat))))
+      tmp = y0_trans(tmp,N)
+      tmp = min(1,max(0,tmp))
+      tmp = trans_mat(tmp,rev(maturity)[1])
+    }
     maturity = c(maturity,tmp)
   }
   maturity <- c(maturity,rep(1,3))
@@ -79,6 +89,7 @@ opt_w0 = function(naa,model_w0,model_wg,model_mat) {
       return( res )
     }
   }
+  # obj_f2(1)
   opt2 = optimize(obj_f2,interval=c(0.1,50))
   # pred_waa(model_wg,opt2$minimum,naa=nc)
   out = obj_f2(opt2$minimum,out=TRUE)
