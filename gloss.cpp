@@ -16,25 +16,114 @@ Type sqrt(Type x){
   return pow(x,Type(0.5));
 }
 
+// inverse of logit
+// template<class Type>
+// Type invlogit(Type x){
+//   return Type(1.0)/(Type(1.0)+exp(-x));
+// }
+
+// https://github.com/glmmTMB/glmmTMB/blob/a74c35fa443c9e86698676f3ffc31149ab1df849/glmmTMB/src/glmmTMB.cpp#L50C1-L58C3
+enum valid_link {
+  log_link                 = 0,
+  logit_link               = 1,
+  probit_link              = 2,
+  inverse_link             = 3,
+  cloglog_link             = 4,
+  identity_link            = 5,
+  sqrt_link                = 6
+};
+
+// https://github.com/glmmTMB/glmmTMB/blob/a74c35fa443c9e86698676f3ffc31149ab1df849/glmmTMB/src/glmmTMB.cpp#L81C1-L111C2
+template<class Type>
+Type inverse_linkfun(Type eta, int link) {
+  Type ans;
+  switch (link) {
+  case log_link:
+    ans = exp(eta);
+    break;
+  case identity_link:
+    ans = eta;
+    break;
+  case logit_link:
+    ans = invlogit(eta);
+    break;
+  case probit_link:
+    ans = pnorm(eta);
+    break;
+  case cloglog_link:
+    ans = Type(1) - exp(-exp(eta));
+    break;
+  case inverse_link:
+    ans = Type(1) / eta;
+    break;
+  case sqrt_link:
+    ans = eta*eta; // pow(eta, Type(2)) doesn't work ... ?
+    break;
+    // TODO: Implement remaining links
+  default:
+    error("Link not implemented!");
+  } // End switch
+  return ans;
+}
+
+// https://github.com/glmmTMB/glmmTMB/blob/a74c35fa443c9e86698676f3ffc31149ab1df849/glmmTMB/src/glmmTMB.cpp#L134C1-L149C2
+/* log transformed inverse_linkfun without losing too much accuracy */
+template<class Type>
+Type log_inverse_linkfun(Type eta, int link) {
+  Type ans;
+  switch (link) {
+  case log_link:
+    ans = eta;
+    break;
+  case logit_link:
+    ans = -logspace_add(Type(0), -eta);
+    break;
+  default:
+    ans = log( inverse_linkfun(eta, link) );
+  } // End switch
+  return ans;
+}
+
+
+// https://github.com/glmmTMB/glmmTMB/blob/a74c35fa443c9e86698676f3ffc31149ab1df849/glmmTMB/src/glmmTMB.cpp#L151C1-L166C2
+/* log transformed inverse_linkfun without losing too much accuracy */
+template<class Type>
+Type log1m_inverse_linkfun(Type eta, int link) {
+  Type ans;
+  switch (link) {
+  case log_link:
+    ans = logspace_sub(Type(0), eta);
+    break;
+  case logit_link:
+    ans = -logspace_add(Type(0), eta);
+    break;
+  default:
+    ans = logspace_sub(Type(0), log( inverse_linkfun(eta, link) ));
+  } // End switch
+  return ans;
+}
+
 template<class Type>
 Type objective_function<Type>::operator() ()
 {
-  DATA_ARRAY(obs_w); // observation matrix (column 0: age, 1: year, 2: weight (g))
+  DATA_ARRAY(obs_w); // observation matrix of weight (column 0: age, 1: year, 2: weight (g))
   // DATA_IVECTOR(ss_wg); // whether state-space modeling is applied for weight and maturity
-  // DATA_ARRAY(obs_g);
+  DATA_ARRAY(obs_g); // observation matrix of maturity (column 0: age, 1: year, 2: maturity (0-1))
   DATA_ARRAY(naa);
   // DATA_ARRAY(maa);
 
   PARAMETER_ARRAY(logwaa);
-  // PARAMETER_ARRAY(maa);
+  PARAMETER_ARRAY(logitg);
 
   PARAMETER_VECTOR(beta_w0);
   PARAMETER_VECTOR(alpha_w);
   PARAMETER_VECTOR(rho_w);
   PARAMETER(iota); // log(SD) for process error in weight growth
-  // PARAMETER(omicron); // log(SD) for process error in maturity growth
+  PARAMETER(omicron); // log(SD) for process error in maturity growth
   PARAMETER(logCV_w); // CV for observation error in weight
-
+  PARAMETER_VECTOR(alpha_g); // intercept of maturity modeling
+  PARAMETER_VECTOR(psi);
+  PARAMETER(logdisp); // dispersion parameter (phi) in log space
 
   // int timeSteps=waa.dim[1]; // 年数
   // int stateDimN=waa.dim[0]; // number of age classes
@@ -43,14 +132,19 @@ Type objective_function<Type>::operator() ()
   DATA_INTEGER(maxAgePlusGroup);
   DATA_INTEGER(dist_wobs); // probability distribution for observation of weight (0: lognormal, 1: gamma)
   DATA_SCALAR(scale_number);
+  DATA_VECTOR(g_fix); // its length is the number of age classes. Non-negative value (0-1) represents the fixed value of maturity at age while a negative value (e.g., -1)indicates estimating maturity.
 
   DATA_SCALAR(scale);
   DATA_VECTOR(ssb);
 
-  Type sd_w = exp(iota);
+  Type sd_w=exp(iota);
+  Type sd_g=exp(omicron);
 
   array<Type> logwaa_pred(logwaa.rows(),logwaa.cols());
   array<Type> waa_true(logwaa.rows(),logwaa.cols());
+  array<Type> maa_true(logwaa.rows(),logwaa.cols());
+  array<Type> logitg_pred(logitg.rows(),logitg.cols());
+
   Type ans_w=0;
   vector<Type> wp(2);
   Type alpha_w_total, rho_w_total,beta_w0_total;
@@ -123,11 +217,86 @@ Type objective_function<Type>::operator() ()
     }
   }
 
+  // process model for maturity
+  Type multi_g;
+  Type ans_g=0.0;
+
+  for(int j=0;j<logwaa.cols();j++){
+    // N_sum(j)=Type(0.0);
+    for(int i=0;i<logwaa.rows();i++){
+      if(g_fix(i)>-1.0){
+        maa_true(i,j)=g_fix(i);
+      }else{
+        a=CppAD::Integer(-g_fix(i))-1;
+        maa_true(i,j)=invlogit(logitg(a,j));
+      }
+      // N_sum(j)+=naa(i,j)/scale_number;
+    }
+  }
+  
+  // process likelihood
+  for(int j=1;j<logwaa.cols();j++){ //最初の年は除く（2年目から）
+    for(int i=0;i<logwaa.rows();i++){
+      if(g_fix(i)<0.0){
+        a=CppAD::Integer(-g_fix(i))-1;
+        multi_g=alpha_g(a);
+        logitg_pred(a,j)=invlogit(multi_g); // increasing ratio of maturity (未成熟だった個体のうち成熟した割合)
+        logitg_pred(a,j)*=Type(1.0)-maa_true(i-1,j-1);
+        logitg_pred(a,j)+=maa_true(i-1,j-1); //expected maturity
+        logitg_pred(a,j)=logit(logitg_pred(a,j));
+        ans_g+=-dnorm(logitg(a,j),logitg_pred(a,j),sd_g,true); // assuming logit-normal process error
+      }
+    }
+  }
+
+  // observation model for maturity
+  int link=1; //logit link
+  minYear=CppAD::Integer((obs_g(0,1)));
+  int minAge_g=CppAD::Integer((obs_g(0,0))); 
+  Type s1, s2, s3;
+  Type tmp_loglik;
+  vector<Type> eta(obs_g.rows());
+  Type disp=exp(logdisp);
+
+  for(int i=0;i<obs_g.rows();i++){
+    a=CppAD::Integer(obs_g(i,0))-minAge_g;
+    y=CppAD::Integer(obs_g(i,1))-minYear;
+    eta(i)=logit(maa_true(a,y));
+    //use ordbeta family in glmmTMB
+    // https://github.com/glmmTMB/glmmTMB/blob/a74c35fa443c9e86698676f3ffc31149ab1df849/glmmTMB/src/glmmTMB.cpp#L676C2-L689C1
+    // https://github.com/saudiwin/ordbetareg_pack/blob/master/R/modeling.R#L565-L573
+    if(obs_g(i,2) == 0.0){
+      tmp_loglik = log1m_inverse_linkfun(eta(i) - psi(0), link);
+      // std::cout << "zero " << asDouble(eta(i)) << " " << asDouble(psi(0)) << " " << asDouble(tmp_loglik) << std::endl;
+    }else{
+      if(obs_g(i,2) == 1.0){
+      tmp_loglik = log_inverse_linkfun(eta(i) - psi(1), link);
+      // std::cout << "one " << asDouble(eta(i)) << " " << asDouble(psi(1)) << " " << asDouble(tmp_loglik) << std::endl;
+    }else{
+      s1 = maa_true(a,y)*disp;
+      s2 = (Type(1)-maa_true(a,y))*disp;
+      s3 = logspace_sub(log_inverse_linkfun(eta(i) - psi(0), link),
+                        log_inverse_linkfun(eta(i) - psi(1), link));
+      tmp_loglik = s3 + dbeta(obs_g(i,2), s1, s2, true);
+      }
+    }
+    ans_g+=-tmp_loglik;
+  }
+
+  Type ans=ans_w+ans_g;
+
   ADREPORT(waa_true);
+  ADREPORT(maa_true);
 
   REPORT(logwaa);
   REPORT(sd_w);
   REPORT(shape);
+  REPORT(logwaa_pred);
+  REPORT(logitg_pred);
+  REPORT(disp);
+  REPORT(eta);
+  REPORT(ans_w);
+  REPORT(ans_g);
 
-  return ans_w;
+  return ans;
 }

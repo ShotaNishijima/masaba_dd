@@ -249,7 +249,9 @@ mod_w_growth$formula
 # alphaに前年の個体数の総数が影響する
 summary(mod_w_growth)
 
-AICc(mod_w_growth)
+temp = update(mod_w_growth,formula = .~log(Number_prev) + 1 + Weight_prev)
+
+AICc(mod_w_growth,temp)
 
 save(mod_w_growth,file=savename("model_w_growth.rda"))
 
@@ -528,8 +530,8 @@ full_mat = betareg(y~Age*Number_prev+Age*Cohort_prev+Age*Cohort_plus,
 full_mat = glmmTMB(y0 ~ Age*Number_prev+Age*Cohort_prev+Age*Cohort_plus,
                    data=maa_dat,family=ordbeta)
 
-?family_glmmTMB
-?betareg
+full_mat$sdr
+
 # full_mat = betareg(y~Age*DF_N+Age*DF_n+Age*DF_n_plus,
 #                    data=maa_dat,link="logit",type="BC")
 
