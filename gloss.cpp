@@ -1,4 +1,4 @@
-// State space assessment model of growth -------------------------------------
+// State space assessment model with growth -------------------------------------
 
 #include <TMB.hpp>
 #include <iostream>
@@ -76,7 +76,7 @@ Type log_inverse_linkfun(Type eta, int link) {
     ans = eta;
     break;
   case logit_link:
-    ans = -logspace_add(Type(0), -eta);
+    ans = -logspace_add(Type(0), -eta); //log(1/(1+exp(-eta))) = -log(1+exp(-eta))
     break;
   default:
     ans = log( inverse_linkfun(eta, link) );
@@ -113,7 +113,8 @@ Type objective_function<Type>::operator() ()
   // DATA_ARRAY(maa);
 
   PARAMETER_ARRAY(logwaa);
-  PARAMETER_ARRAY(logitg);
+  PARAMETER_ARRAY(logitmaa);
+  // PARAMETER_ARRAY(r); // latent variables from standard normal distribution for maturity process
 
   PARAMETER_VECTOR(beta_w0);
   PARAMETER_VECTOR(alpha_w);
@@ -138,12 +139,12 @@ Type objective_function<Type>::operator() ()
   DATA_VECTOR(ssb);
 
   Type sd_w=exp(iota);
-  Type sd_g=exp(omicron);
+  // Type sd_g=exp(omicron);
 
   array<Type> logwaa_pred(logwaa.rows(),logwaa.cols());
   array<Type> waa_true(logwaa.rows(),logwaa.cols());
   array<Type> maa_true(logwaa.rows(),logwaa.cols());
-  array<Type> logitg_pred(logitg.rows(),logitg.cols());
+  array<Type> maa_pred(logitmaa.rows(),logitmaa.cols());
 
   Type ans_w=0;
   vector<Type> wp(2);
@@ -217,71 +218,108 @@ Type objective_function<Type>::operator() ()
     }
   }
 
-  // process model for maturity
+  // process model for maturity (no observation error)
   Type multi_g;
   Type ans_g=0.0;
 
   for(int j=0;j<logwaa.cols();j++){
     // N_sum(j)=Type(0.0);
     for(int i=0;i<logwaa.rows();i++){
-      if(g_fix(i)>-1.0){
+      if(g_fix(i)>-0.5){
         maa_true(i,j)=g_fix(i);
       }else{
         a=CppAD::Integer(-g_fix(i))-1;
-        maa_true(i,j)=invlogit(logitg(a,j));
+        maa_true(i,j)=invlogit(logitmaa(a,j));
+        // g_pred(a,j)
       }
       // N_sum(j)+=naa(i,j)/scale_number;
     }
   }
-  
+
   // process likelihood
+  Type v,r;
+  Type s1, s2;
   for(int j=1;j<logwaa.cols();j++){ //最初の年は除く（2年目から）
     for(int i=0;i<logwaa.rows();i++){
       if(g_fix(i)<0.0){
         a=CppAD::Integer(-g_fix(i))-1;
         multi_g=alpha_g(a);
-        logitg_pred(a,j)=invlogit(multi_g); // increasing ratio of maturity (未成熟だった個体のうち成熟した割合)
-        logitg_pred(a,j)*=Type(1.0)-maa_true(i-1,j-1);
-        logitg_pred(a,j)+=maa_true(i-1,j-1); //expected maturity
-        logitg_pred(a,j)=logit(logitg_pred(a,j));
-        ans_g+=-dnorm(logitg(a,j),logitg_pred(a,j),sd_g,true); // assuming logit-normal process error
+        maa_pred(a,j)=maa_true(i-1,j-1)+invlogit(multi_g)*(Type(1.0)-maa_true(i-1,j-1));
+        s1=maa_pred(a,j)*exp(omicron);
+        s2=(Type(1.0)-maa_pred(a,j))*exp(omicron);
+        v=pbeta(maa_true(i,j),s1,s2);
+        r=qnorm(v,Type(0.0),Type(1.0));
+        ans_g += -dnorm(r,Type(0.0),Type(1.0),true);  
+        // logitg_pred(a,j)=invlogit(multi_g); // increasing ratio of maturity (未成熟だった個体のうち成熟した割合)
+        // logitg_pred(a,j)*=(Type(1.0)-maa_true(i-1,j-1));
+        // logitg_pred(a,j)+=maa_true(i-1,j-1); //expected maturity
+        // logitg_pred(a,j)=logit(logitg_pred(a,j));
+        // ans_g+=-dnorm(logitg(a,j),logitg_pred(a,j),sd_g,true); // assuming logit-normal process error
       }
     }
   }
-
+   
   // observation model for maturity
-  int link=1; //logit link
+  // int link=1; //logit link
   minYear=CppAD::Integer((obs_g(0,1)));
   int minAge_g=CppAD::Integer((obs_g(0,0))); 
-  Type s1, s2, s3;
-  Type tmp_loglik;
+  Type s3;
+  // Type tmp_loglik;
   vector<Type> eta(obs_g.rows());
   Type disp=exp(logdisp);
 
   for(int i=0;i<obs_g.rows();i++){
     a=CppAD::Integer(obs_g(i,0))-minAge_g;
     y=CppAD::Integer(obs_g(i,1))-minYear;
-    eta(i)=logit(maa_true(a,y));
-    //use ordbeta family in glmmTMB
-    // https://github.com/glmmTMB/glmmTMB/blob/a74c35fa443c9e86698676f3ffc31149ab1df849/glmmTMB/src/glmmTMB.cpp#L676C2-L689C1
-    // https://github.com/saudiwin/ordbetareg_pack/blob/master/R/modeling.R#L565-L573
-    if(obs_g(i,2) == 0.0){
-      tmp_loglik = log1m_inverse_linkfun(eta(i) - psi(0), link);
+    
+    if (obs_g(i,2) == 0.0) {
+      // ans_g += -log1m_inverse_linkfun(alpha_g(a) - psi(0), logit_link);
+      ans_g += -log1m_inverse_linkfun(logit(maa_true(a,y)) - psi(0), logit_link);
       // std::cout << "zero " << asDouble(eta(i)) << " " << asDouble(psi(0)) << " " << asDouble(tmp_loglik) << std::endl;
-    }else{
-      if(obs_g(i,2) == 1.0){
-      tmp_loglik = log_inverse_linkfun(eta(i) - psi(1), link);
+    } else if (obs_g(i,2) == 1.0) {
+      // ans_g += -log_inverse_linkfun(alpha_g(a) - psi(1), logit_link);
+      ans_g += -log_inverse_linkfun(logit(maa_true(a,y)) - psi(1), logit_link);
       // std::cout << "one " << asDouble(eta(i)) << " " << asDouble(psi(1)) << " " << asDouble(tmp_loglik) << std::endl;
-    }else{
+    } else {
+      // s1 = invlogit(alpha_g(a))*disp;
       s1 = maa_true(a,y)*disp;
       s2 = (Type(1)-maa_true(a,y))*disp;
-      s3 = logspace_sub(log_inverse_linkfun(eta(i) - psi(0), link),
-                        log_inverse_linkfun(eta(i) - psi(1), link));
-      tmp_loglik = s3 + dbeta(obs_g(i,2), s1, s2, true);
-      }
+      // s3 = logspace_sub(log_inverse_linkfun(alpha_g(a) - psi(0), logit_link),
+      //                   log_inverse_linkfun(alpha_g(a) - psi(1), logit_link));
+      s3 = logspace_sub(log_inverse_linkfun(logit(maa_true(a,y)) - psi(0), logit_link),
+                        log_inverse_linkfun(logit(maa_true(a,y)) - psi(1), logit_link));
+      ans_g += -s3 - dbeta(obs_g(i,2), s1, s2, true);
     }
-    ans_g+=-tmp_loglik;
   }
+
+  // for(int i=0;i<obs_g.rows();i++){
+  //   a=CppAD::Integer(obs_g(i,0))-minAge_g;
+  //   y=CppAD::Integer(obs_g(i,1))-minYear;
+  //   // eta(i)=logit(maa_true(a,y));
+  //   eta(i)=alpha_g(a);
+  //   
+  //   //use ordbeta family in glmmTMB
+  //   // https://github.com/glmmTMB/glmmTMB/blob/a74c35fa443c9e86698676f3ffc31149ab1df849/glmmTMB/src/glmmTMB.cpp#L676C2-L689C1
+  //   // https://github.com/saudiwin/ordbetareg_pack/blob/master/R/modeling.R#L565-L573
+  //   
+  //   if(obs_g(i,2) == 0.0){
+  //     ans_g += -log1m_inverse_linkfun(eta(i) - psi(0), log_link);
+  //     // std::cout << "zero " << asDouble(eta(i)) << " " << asDouble(psi(0)) << " " << asDouble(tmp_loglik) << std::endl;
+  //   }else
+  //     if(obs_g(i,2) == 1.0){
+  //     ans_g += -log_inverse_linkfun(eta(i) - psi(1), log_link);
+  //     // std::cout << "one " << asDouble(eta(i)) << " " << asDouble(psi(1)) << " " << asDouble(tmp_loglik) << std::endl;
+  //   }else{
+  //     // s1 = maa_true(a,y)*disp;
+  //     // s2 = (Type(1)-maa_true(a,y))*disp;
+  //     s1 = invlogit(alpha_g(a))*disp;
+  //     s2 = (Type(1)-invlogit(alpha_g(a)))*disp;
+  //     s3 = logspace_sub(log_inverse_linkfun(eta(i) - psi(0), log_link),
+  //                       log_inverse_linkfun(eta(i) - psi(1), log_link));
+  //     ans_g += -s3 - dbeta(obs_g(i,2), s1, s2, true);
+  //     }
+  //   // ans_g+=-tmp_loglik;
+  // }
 
   Type ans=ans_w+ans_g;
 
@@ -290,9 +328,10 @@ Type objective_function<Type>::operator() ()
 
   REPORT(logwaa);
   REPORT(sd_w);
+  // REPORT(sd_g);
   REPORT(shape);
   REPORT(logwaa_pred);
-  REPORT(logitg_pred);
+  // REPORT(logitg_pred);
   REPORT(disp);
   REPORT(eta);
   REPORT(ans_w);

@@ -328,6 +328,19 @@ maa_dat2 = maa_dat %>% na.omit() %>% mutate(Age = factor(Age))
 mod_mat = glmmTMB(y~Age + Cohort_plus + Age:Cohort_plus + 1,data=maa_dat2,family=ordbeta)
 mod_mat0 = glmmTMB(y~Age +  0,data=maa_dat2,family=ordbeta)
 
+
+temp = glmmTMB(y~1,data=maa_dat2,family=ordbeta)
+temp$sdr
+
+predict(temp,type="response") %>% mean
+maa_dat2$y %>% mean
+
+temp2 = glmmTMB(y~1,data=filter(maa_dat2,y>0 & y<1),family=beta_family)
+
+predict(temp2,type="response") %>% mean
+maa_dat2$y %>% mean
+
+
 mod_mat1 = glmmTMB(y~Age +  0,data=maa_dat2,family=ordbeta("probit"))
 
 # mod_mat1 = glmmTMB(y~Age +  0,data=maa_dat,family=ordbeta,dispformula = ~Age)
@@ -361,8 +374,13 @@ summary(predict(mod_mat,type="response"))
 # 
 # mod_mat0$obj$env$map
 # 
-# invlogit = function(x) 1/(1+exp(-x))
-# invlogit = Vectorize(invlogit)
+
+logit = function(x) log(x/(1-x))
+logit = Vectorize(logit)
+
+
+invlogit = function(x) 1/(1+exp(-x))
+invlogit = Vectorize(invlogit)
 # plot(invlogit(-20:20))
 
 compile("gloss.cpp")
@@ -371,6 +389,8 @@ dyn.load(dynlib("gloss"))
 # vpares$input$dat$maa
 
 g_fix = c(0,-1,-2,-3,1,1,1)
+
+# g_fix = c(0,-1,-1,-1,1,1,1)
 
 # dim(obs_g)
 
@@ -383,28 +403,48 @@ alpha_g = mod_mat0$fit$par[names(mod_mat0$fit$par)=="beta"] %>% as.numeric()
 psi = as.numeric(mod_mat0$fit$par[names(mod_mat0$fit$par)=="psi"])
 logdisp = as.numeric(mod_mat0$fit$par[names(mod_mat0$fit$par)=="betad"])[1]
 
-logit_deltag=matrix(rep(alpha_g,ncol(logwaa)),nrow=3)
+# logit_deltag=matrix(rep(alpha_g,ncol(logwaa)),nrow=3)
+
+maa = vpares$input$dat$maa
+logitmaa = matrix(
+  rep(logit(rowMeans(maa[2:4,])),ncol(logwaa)),nrow=3)
+
+logitmaa = matrix(
+  0,ncol=ncol(logwaa),nrow=3)
+
 
 # logit_deltag=matrix(predict(mod_mat0),nrow=3)
 
 
+# dim(logwaa)
+# dim(logitg)
+# dim(naa)
 
-dim(logwaa)
-dim(logit_deltag)
-dim(naa)
-
-pars=list(logwaa=logwaa,logit_deltag=logit_deltag,
+pars=list(logwaa=logwaa,logitmaa=logitmaa,
           beta_w0=c(beta_w0,0),alpha_w=c(alpha_w,0),rho_w=rho_w,
-          iota=log(0.1),omicron=log(0.1),logCV_w=logCV_w,alpha_g=alpha_g,
-          psi=psi,logdisp=logdisp)
+          iota=log(0.1),omicron=log(5),logCV_w=logCV_w,alpha_g=alpha_g,
+          psi=psi,logdisp=logdisp-1)
 
-obj = TMB::MakeADFun(tmbdata,pars,random=c("logwaa","logit_deltag"),DLL="gloss")
+# pars=list(logwaa=logwaa,beta_w0=c(beta_w0,0),alpha_w=c(alpha_w,0),rho_w=rho_w,
+#           iota=log(0.1),logCV_w=logCV_w,alpha_g=alpha_g,
+#           psi=psi,logdisp=logdisp)
+# 
 
+obj = TMB::MakeADFun(tmbdata,pars,random=c("logwaa","logitmaa"),DLL="gloss")
+
+map = list()
+
+# pars$maa
+# 
 # map = list(omicron=factor(NA),alpha_g=rep(factor(NA),length(alpha_g)),
 #            psi=rep(factor(NA),length(psi)),logdisp=factor(NA))
+# # 
+map = list(omicron=factor(NA))
+# # 
+obj = TMB::MakeADFun(tmbdata,pars,random=c("logwaa","logitmaa"),DLL="gloss",
+                     map=map)
 # 
-# obj = TMB::MakeADFun(tmbdata,pars,random=c("logwaa","logit_deltag"),DLL="gloss",
-#                      map=map)
+# obj = TMB::MakeADFun(tmbdata,pars,random=c("logwaa"),DLL="gloss")
 
 opt <- nlminb(obj$par, obj$fn, obj$gr)
 opt
@@ -412,3 +452,172 @@ opt
 rep = sdreport(obj,bias.correct = TRUE)
 rep
 
+obj$env$report()
+
+psi
+
+
+
+dyn.unload(dynlib("gloss"))
+
+
+# tray simple ordbeta model
+
+compile("ordbeta.cpp")
+dyn.load(dynlib("ordbeta"))
+
+tmp = maa_dat %>%
+  mutate(x=Age-min(Age)) %>%
+  # filter(0<y & y<1) %>% 
+  dplyr::select(y,x) %>%
+  na.omit()
+
+y_trans = function(y0,N) (y0*(N-1)+0.5)/N
+
+y = y_trans(tmp$y,nrow(tmp))
+x = rep(0,length(y))
+x = tmp$x
+
+tmp
+# res = glmmTMB(y~1,data=tmp,family=beta_family)
+res = glmmTMB(y~0+factor(x),data=tmp,family=ordbeta)
+res
+res$sdr
+
+
+alpha = res$fit$par[names(res$fit$par)=="beta"]
+logdisp = res$fit$par[names(res$fit$par)=="betad"]
+# psi = res$fit$par[names(res$fit$par)=="psi"]
+
+tmbdata=list(y=y,x=x)
+# pars=list(alpha=alpha,logdisp=logdisp,psi=psi)
+# pars=list(alpha=alpha,logdisp=logdisp)
+
+obj = TMB::MakeADFun(tmbdata,pars,DLL="ordbeta")
+opt <- nlminb(obj$par, obj$fn, obj$gr)
+opt
+rep = sdreport(obj)
+rep
+
+res$sdr
+
+dyn.unload(dynlib("ordbeta"))
+
+
+n=100
+
+logdisp=2
+disp=exp(logdisp)
+# disp=100
+# sd=0.1
+mu = c(0.1)
+s1 = mu*disp
+s2 = (1-mu)*disp
+y = rbeta(n,s1,s2)
+hist(y)
+
+logdisp=2
+disp=exp(logdisp)
+mu = c(0.1)
+s1 = mu*disp
+s2 = (1-mu)*disp
+r=rnorm(n,0,1)
+v=pnorm(r,0,1) 
+w=qbeta(v,s1,s2)
+
+hist(w)
+
+
+v=pbeta(w,s1,s2)
+r=qnorm(v,0,1)
+
+r=rnorm(n,0,sd)
+y=logit(mu)+r
+hist(invlogit(y))
+
+
+
+# mu=pnorm(r,0,1)
+# logdisp=2
+# disp=exp(logdisp)
+# disp=1000
+s1=mu*disp
+s2=(1-mu)*disp
+w = qbeta(mu,s1,s2)
+hist(w)
+
+i<-1
+
+alpha_g
+alpha_g = c(-3.5,-0.5,1)
+omicron=1
+logdisp=1
+disp=exp(logdisp)
+# mu = c(0.1)
+# s1 = mu*disp
+# s2 = (1-mu)*disp
+# r=rnorm(n,0,1)
+# v=pnorm(r,0,1) 
+# w=qbeta(v,s1,s2)
+maa_obs <- maa_true  <- matrix(0,nrow=3,ncol=50)
+maa_true[,1] <- c(0.15,0.75,0.95)
+set.seed(1)
+for(j in 2:ncol(maa_true)){
+  for(i in 1:3) {
+    if(i==1){
+      tmp = invlogit(alpha_g[i])
+    } else{
+      tmp = maa_true[i-1,j-1]+invlogit(alpha_g[i])*(1-maa_true[i-1,j-1])
+    }
+    s1 = tmp*exp(omicron)
+    s2 = (1-tmp)*exp(omicron)
+    r = rnorm(1,0,1)
+    v = pnorm(r,0,1)
+    w = qbeta(v,s1,s2)
+    maa_true[i,j] <- w
+  }
+}
+set.seed(2)
+for(j in 1:ncol(maa_true)){
+  for(i in 1:3) {
+    maa_obs[i,j] <- rbeta(1,maa_true[i,j]*disp,(1-maa_true[i,j])*disp)
+    maa_obs[i,j] <- round(maa_obs[i,j],2)
+  }
+}
+
+maa_obs
+
+compile("ordbeta.cpp")
+dyn.load(dynlib("ordbeta"))
+
+obs_g  = data.frame(age=rep(1:nrow(maa_true)-1,ncol(maa_true)),
+                    year=rep(1:ncol(maa_true)-1,each=nrow(maa_true)),
+                    maturity=as.numeric(maa_obs)) %>%
+  mutate(maturity = y_trans(maturity,n())) %>%
+  as.matrix()
+
+logitmaa = log(maa_true)/(1-maa_true)
+tmbdata=list(obs_g=obs_g)
+# pars=list(alpha=alpha_g,logdisp=logdisp,psi=c(0,0),omicron=omicron,logitmaa=logitmaa)
+
+logsd = log(sd(as.numeric(maa_obs-maa_true)))
+
+# pars=list(alpha=alpha_g,logdisp=logdisp,omicron=omicron,logitmaa=logitmaa)
+# pars=list(alpha=alpha_g,logdisp=logdisp,psi=c(0,0),omicron=log(0.05),logitmaa=logitmaa)
+pars=list(alpha=alpha_g,logdisp=logdisp,omicron=log(0.05),logitmaa=logitmaa)
+
+# map=list(psi=rep(factor(NA),2))
+# map=list(alpha=rep(factor(NA),length(alpha_g)),logdisp=factor(NA),omicron=factor(NA),
+#          psi=rep(factor(NA),2))
+# map=list(logdisp=factor(NA),omicron=factor(NA),
+#          psi=rep(factor(NA),2))
+
+map=list()
+# map=list(omicron=factor(NA))
+obj = TMB::MakeADFun(tmbdata,pars,random=c("logitmaa"),DLL="ordbeta",
+                     map=map)
+opt <- nlminb(obj$par, obj$fn, obj$gr)
+
+opt
+rep = sdreport(obj)
+rep
