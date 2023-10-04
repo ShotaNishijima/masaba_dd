@@ -89,73 +89,50 @@ Type log1m_inverse_linkfun(Type eta, int link) {
 template<class Type>
 Type objective_function<Type>::operator() ()
 {
-  DATA_ARRAY(maa);
-  DATA_ARRAY(naa);
-  PARAMETER_VECTOR(alpha);
-  // PARAMETER(logdisp);
+  DATA_VECTOR(y);
+  DATA_IVECTOR(id);
+  
+  PARAMETER(logitp);
+  PARAMETER_VECTOR(logitr);
+  PARAMETER_VECTOR(logdisp);
   PARAMETER_VECTOR(psi);
-  PARAMETER(omicron);
-  // PARAMETER_ARRAY(logitmaa);
-  PARAMETER_VECTOR(beta);
   
-  // vector<Type> y_pred = invlogit(alpha(x));
   Type ans=0.0;
-  Type disp=exp(logdisp);
-  Type s1,s2;
-  Type s3;
-  // Type v,r;
-  // array<Type> maa_true(logitmaa.rows(),logitmaa.cols());
-  array<Type> maa_pred(maa.rows(),maa.cols());
+  vector<Type> disp=exp(logdisp);
+  vector<Type> y_pred(y.size());
+  Type s1,s2,s3;
+  // Type v,w;
+  vector<Type> r=invlogit(logitr);
   
-  // process model (no mearsurement error)
-  for(int j=1;j<logitmaa.cols();j++){
-    for(int i=0;i<logitmaa.rows();i++){
-      if(i==0){
-        // maa_pred(i,j)=invlogit(alpha(i));
-        maa_pred(i,j)=invlogit(alpha(i)+beta(i)*naa(i,j-1));
-      }else{
-        // maa_pred(i,j)=maa_true(i-1,j-1)+invlogit(alpha(i))*(Type(1.0)-maa_true(i-1,j-1));
-        maa_pred(i,j)=maa_true(i-1,j-1)+invlogit(alpha(i)+beta(i)*naa(i,j-1))*(Type(1.0)-maa_true(i-1,j-1));
-      }
-      // ans+=-dnorm(logit(maa_true(i,j)),logit(maa_pred(i,j)),exp(omicron),true);
-      s1=maa_pred(i,j)*exp(omicron);
-      s2=(Type(1.0)-maa_pred(i,j))*exp(omicron);
-      // s1=maa_pred(i,j)*disp; //assuming observation error size = measurement error size
-      // s2=(Type(1.0)-maa_pred(i,j))*disp;
-      v=pbeta(maa_true(i,j),s1,s2);
-      r=qnorm(v,Type(0.0),Type(1.0));
-      ans+=-dnorm(r,Type(0.0),Type(1.0));
-    }
+  for(int i=0;i<r.size();i++){
+    // s1=invlogit(logitp)*disp(0);
+    // s2=(Type(1.0)-invlogit(logitp))*disp(0);
+    // v=pbeta(r(i),s1,s2);
+    // w=qnorm(v,Type(0.0),Type(1.0));
+    // ans += -dnorm(w,Type(0.0),Type(1.0),true); // random effect component
+    ans += -dnorm(logitr(i),logitp,disp(0),true); // random effect component
   }
-
-  // observation model
-  int a,y;
-  for(int i=0;i<obs_g.rows();i++){
-    a=CppAD::Integer(obs_g(i,0)-obs_g(0,0));
-    y=CppAD::Integer(obs_g(i,1)-obs_g(0,1));
-    if (obs_g(i,2) == 0.0) {
-      ans += -log1m_inverse_linkfun(logit(maa_true(a,y)) - psi(0), logit_link);
+  
+  for(int i=0;i<y.size();i++){
+    // y_pred(i) = logitp + r(id(i));
+    // y_pred(i) = invlogit(y_pred(i));
+    // ans += -dnorm(y(i),y_pred(i),disp(1),true);
+    y_pred(i)=r(id(i));
+    if (y(i) == 0.0) {
+      ans += -log1m_inverse_linkfun(logit(y_pred(i)) - psi(0), logit_link);
       // std::cout << "zero " << asDouble(eta(i)) << " " << asDouble(psi(0)) << " " << asDouble(tmp_loglik) << std::endl;
-    } else if (obs_g(i,2) == 1.0) {
-      ans += -log_inverse_linkfun(logit(maa_true(a,y)) - psi(1), logit_link);
+    } else if (y(i) == 1.0) {
+      ans += -log_inverse_linkfun(logit(y_pred(i)) - psi(1), logit_link);
       // std::cout << "one " << asDouble(eta(i)) << " " << asDouble(psi(1)) << " " << asDouble(tmp_loglik) << std::endl;
     } else {
-      s1 = maa_true(a,y)*disp;
-      s2 = (Type(1)-maa_true(a,y))*disp;
-      s3 = logspace_sub(log_inverse_linkfun(logit(maa_true(a,y)) - psi(0), logit_link),
-                        log_inverse_linkfun(logit(maa_true(a,y)) - psi(1), logit_link));
-      ans += -s3 - dbeta(obs_g(i,2), s1, s2, true);
-      // ans += -dbeta(obs_g(i,2), s1, s2, true);
+      s1 = y_pred(i)*disp(1);
+      s2 = (Type(1.0)-y_pred(i))*disp(1);
+      s3 = logspace_sub(log_inverse_linkfun(logit(y_pred(i)) - psi(0), logit_link),
+                        log_inverse_linkfun(logit(y_pred(i)) - psi(1), logit_link));
+      ans += -s3 - dbeta(y(i), s1, s2, true);
     }
-
-    // s1 = y_pred(i)*disp;
-    // s2 = (Type(1)-y_pred(i))*disp;
-    // ans += -dbeta(y(i), s1, s2, true);
-    // }
-    // ans+=-dnorm(obs_g(i,2),maa_true(a,y),disp,true);
   }
   
-  // ADREPORT(alpha);
-  
   return ans;
+  
 }

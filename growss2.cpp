@@ -108,23 +108,22 @@ Type objective_function<Type>::operator() ()
 {
   DATA_ARRAY(obs_w); // observation matrix of weight (column 0: age, 1: year, 2: weight (g))
   // DATA_IVECTOR(ss_wg); // whether state-space modeling is applied for weight and maturity
-  // DATA_ARRAY(maa); // observation matrix of maturity (column 0: age, 1: year, 2: maturity (0-1))
+  DATA_ARRAY(maa);
   DATA_ARRAY(naa);
-  // DATA_ARRAY(maa);
 
   PARAMETER_ARRAY(logwaa);
   // PARAMETER_ARRAY(logitmaa);
-  // PARAMETER_ARRAY(r); // latent variables from standard normal distribution for maturity process
+  PARAMETER_ARRAY(r); // latent variables from standard normal distribution for maturity process
 
   PARAMETER_VECTOR(beta_w0);
   PARAMETER_VECTOR(alpha_w);
   PARAMETER_VECTOR(rho_w);
-  PARAMETER(iota); // log(SD) for process error in weight growth
-  // PARAMETER(omicron); // log(SD) for process error in maturity growth
+  PARAMETER(omicron); // log(SD) for process error in weight growth
+  PARAMETER(iota); // log(SD) for process error in maturity growth
   PARAMETER(logCV_w); // CV for observation error in weight
-  // PARAMETER_VECTOR(alpha_g); // intercept of maturity modeling
-  // PARAMETER_VECTOR(psi);
-  // PARAMETER(logdisp); // dispersion parameter (phi) in log space
+  PARAMETER_VECTOR(alpha_g); // intercept of maturity modeling
+  PARAMETER_VECTOR(psi);
+  PARAMETER(logdisp); // dispersion parameter (phi) in log space for beta distribution
 
   // int timeSteps=waa.dim[1]; // 年数
   // int stateDimN=waa.dim[0]; // number of age classes
@@ -137,16 +136,15 @@ Type objective_function<Type>::operator() ()
 
   DATA_SCALAR(scale);
   DATA_VECTOR(ssb);
+  // vector<Type> ssb(naa.cols());
 
-  Type sd_w=exp(iota);
-  // Type sd_g=exp(omicron);
+  Type sd_w=exp(omicron);
+  Type sd_g=exp(iota);
 
   array<Type> logwaa_pred(logwaa.rows(),logwaa.cols());
   array<Type> waa_true(logwaa.rows(),logwaa.cols());
-  // array<Type> maa_pred(maa.rows(),maa.cols());
   logwaa_pred.fill(0.0);
   waa_true.fill(-1);
-  // maa_pred.fill(-1);
 
   Type ans_w=0;
   vector<Type> wp(2);
@@ -156,9 +154,11 @@ Type objective_function<Type>::operator() ()
   // process model for weight
   for(int j=0;j<logwaa.cols();j++){
     N_sum(j)=Type(0.0);
+    // ssb(j)=Type(0.0);
     for(int i=0;i<logwaa.rows();i++){
       waa_true(i,j)=exp(logwaa(i,j));
       N_sum(j)+=naa(i,j)/scale_number;
+      // ssb(j)+=naa(i,j)*maa(i,j)*waa_true(i,j)/scale;
     }
   }
 
@@ -221,116 +221,47 @@ Type objective_function<Type>::operator() ()
   }
 
   // process model for maturity (no observation error)
-  // Type multi_g;
   Type ans_g=0.0;
+  array<Type> maa_pred(maa.rows(),maa.cols());
+  array<Type> maa_diff(maa.rows(),maa.cols());
+  array<Type> maa_true(maa.rows(),maa.cols());
+  array<Type> diff_pred(maa.rows(),maa.cols());
+  maa_pred.fill(-1);
+  maa_diff.fill(-1);
+  Type multi_g;
 
-  // for(int j=0;j<logwaa.cols();j++){
-  //   // N_sum(j)=Type(0.0);
-  //   for(int i=0;i<logwaa.rows();i++){
-  //     if(g_fix(i)>-0.5){
-  //       maa_true(i,j)=g_fix(i);
-  //     }else{
-  //       a=CppAD::Integer(-g_fix(i))-1;
-  //       maa_true(i,j)=invlogit(logitmaa(a,j));
-  //       // g_pred(a,j)
-  //     }
-  //     // N_sum(j)+=naa(i,j)/scale_number;
-  //   }
-  // }
-
-  // process likelihood
-  // Type disp=exp(omicron);
-  // // Type v,r;
-  // Type s1, s2, s3;
-  // // Type ans_g=0.0;
-  // for(int j=1;j<maa.cols();j++){ //最初の年は除く（2年目から）
-  //   for(int i=1;i<maa.rows();i++){
-  //     if(g_fix(i)<0.0){
-  //       a=CppAD::Integer(-g_fix(i))-1;
-  //       multi_g=alpha_g(a);
-  //       maa_pred(i,j)=maa(i-1,j-1)+invlogit(multi_g)*(Type(1.0)-maa(i-1,j-1));
-  //       if (maa(i,j) == 0.0) {
-  //         ans_g += -log1m_inverse_linkfun(logit(maa(i,j)) - psi(0), logit_link);
-  //         // std::cout << "zero " << asDouble(eta(i)) << " " << asDouble(psi(0)) << " " << asDouble(tmp_loglik) << std::endl;
-  //       } else if (maa(i,j) == 1.0) {
-  //         ans_g += -log_inverse_linkfun(logit(maa(i,j)) - psi(1), logit_link);
-  //         // std::cout << "one " << asDouble(eta(i)) << " " << asDouble(psi(1)) << " " << asDouble(tmp_loglik) << std::endl;
-  //       } else {
-  //         // s1 = invlogit(alpha_g(a))*disp;
-  //         s1 = maa(i,j)*disp;
-  //         s2 = (Type(1)-maa(i,j))*disp;
-  //         // s3 = logspace_sub(log_inverse_linkfun(alpha_g(a) - psi(0), logit_link),
-  //         //                   log_inverse_linkfun(alpha_g(a) - psi(1), logit_link));
-  //         s3 = logspace_sub(log_inverse_linkfun(logit(maa(i,j)) - psi(0), logit_link),
-  //                           log_inverse_linkfun(logit(maa(i,j)) - psi(1), logit_link));
-  //         ans_g += -s3 - dbeta(maa(i,j), s1, s2, true);
-  //       }
-  //     }
-  //   }
-  // }
+  Type disp=exp(logdisp);
+  Type s1, s2, s3;
+  for(int j=1;j<maa.cols();j++){ //最初の年は除く（2年目から）
+    for(int i=1;i<maa.rows();i++){
+      maa_diff(i,j)=(maa(i,j)-maa(i-1,j-1))/(Type(1.0)-maa(i-1,j-1));
+      if(g_fix(i)<0.0){
+        a=CppAD::Integer(-g_fix(i))-1;
+        multi_g=alpha_g(a);
+        maa_pred(i,j)=maa(i-1,j-1)+invlogit(multi_g)*(Type(1.0)-maa(i-1,j-1));
+        if (maa_diff(i,j) == 0.0) {
+          // ans_g += -log1m_inverse_linkfun(logit(maa_pred(i,j)) - psi(0), logit_link);
+          ans_g += -log1m_inverse_linkfun(multi_g - psi(0), logit_link);
+          // std::cout << "zero " << asDouble(eta(i)) << " " << asDouble(psi(0)) << " " << asDouble(tmp_loglik) << std::endl;
+        } else if (maa_diff(i,j) == 1.0) {
+          // ans_g += -log_inverse_linkfun(logit(maa_pred(i,j)) - psi(1), logit_link);
+          ans_g += -log_inverse_linkfun(multi_g - psi(1), logit_link);
+          // std::cout << "one " << asDouble(eta(i)) << " " << asDouble(psi(1)) << " " << asDouble(tmp_loglik) << std::endl;
+        } else {
+          // s1 = maa_pred(i,j)*disp;
+          // s2 = (Type(1)-maa_pred(i,j))*disp;
+          s1 = invlogit(multi_g)*disp;
+          s2 = (Type(1.0)-invlogit(multi_g))*disp;
+          // s3 = logspace_sub(log_inverse_linkfun(logit(maa_pred(i,j)) - psi(0), logit_link),
+          //                   log_inverse_linkfun(logit(maa_pred(i,j)) - psi(1), logit_link));
+          s3 = logspace_sub(log_inverse_linkfun(multi_g - psi(0), logit_link),
+                            log_inverse_linkfun(multi_g - psi(1), logit_link));
+          ans_g += -s3 - dbeta(maa_diff(i,j), s1, s2, true);
+        }
+      }
+    }
+  }
    
-  // // observation model for maturity
-  // // int link=1; //logit link
-  // minYear=CppAD::Integer((obs_g(0,1)));
-  // int minAge_g=CppAD::Integer((obs_g(0,0))); 
-  // Type s3;
-  // // Type tmp_loglik;
-  // vector<Type> eta(obs_g.rows());
-  // Type disp=exp(logdisp);
-  // 
-  // for(int i=0;i<obs_g.rows();i++){
-  //   a=CppAD::Integer(obs_g(i,0))-minAge_g;
-  //   y=CppAD::Integer(obs_g(i,1))-minYear;
-  //   
-  //   if (obs_g(i,2) == 0.0) {
-  //     // ans_g += -log1m_inverse_linkfun(alpha_g(a) - psi(0), logit_link);
-  //     ans_g += -log1m_inverse_linkfun(logit(maa_true(a,y)) - psi(0), logit_link);
-  //     // std::cout << "zero " << asDouble(eta(i)) << " " << asDouble(psi(0)) << " " << asDouble(tmp_loglik) << std::endl;
-  //   } else if (obs_g(i,2) == 1.0) {
-  //     // ans_g += -log_inverse_linkfun(alpha_g(a) - psi(1), logit_link);
-  //     ans_g += -log_inverse_linkfun(logit(maa_true(a,y)) - psi(1), logit_link);
-  //     // std::cout << "one " << asDouble(eta(i)) << " " << asDouble(psi(1)) << " " << asDouble(tmp_loglik) << std::endl;
-  //   } else {
-  //     // s1 = invlogit(alpha_g(a))*disp;
-  //     s1 = maa_true(a,y)*disp;
-  //     s2 = (Type(1)-maa_true(a,y))*disp;
-  //     // s3 = logspace_sub(log_inverse_linkfun(alpha_g(a) - psi(0), logit_link),
-  //     //                   log_inverse_linkfun(alpha_g(a) - psi(1), logit_link));
-  //     s3 = logspace_sub(log_inverse_linkfun(logit(maa_true(a,y)) - psi(0), logit_link),
-  //                       log_inverse_linkfun(logit(maa_true(a,y)) - psi(1), logit_link));
-  //     ans_g += -s3 - dbeta(obs_g(i,2), s1, s2, true);
-  //   }
-  // }
-
-  // for(int i=0;i<obs_g.rows();i++){
-  //   a=CppAD::Integer(obs_g(i,0))-minAge_g;
-  //   y=CppAD::Integer(obs_g(i,1))-minYear;
-  //   // eta(i)=logit(maa_true(a,y));
-  //   eta(i)=alpha_g(a);
-  //   
-  //   //use ordbeta family in glmmTMB
-  //   // https://github.com/glmmTMB/glmmTMB/blob/a74c35fa443c9e86698676f3ffc31149ab1df849/glmmTMB/src/glmmTMB.cpp#L676C2-L689C1
-  //   // https://github.com/saudiwin/ordbetareg_pack/blob/master/R/modeling.R#L565-L573
-  //   
-  //   if(obs_g(i,2) == 0.0){
-  //     ans_g += -log1m_inverse_linkfun(eta(i) - psi(0), log_link);
-  //     // std::cout << "zero " << asDouble(eta(i)) << " " << asDouble(psi(0)) << " " << asDouble(tmp_loglik) << std::endl;
-  //   }else
-  //     if(obs_g(i,2) == 1.0){
-  //     ans_g += -log_inverse_linkfun(eta(i) - psi(1), log_link);
-  //     // std::cout << "one " << asDouble(eta(i)) << " " << asDouble(psi(1)) << " " << asDouble(tmp_loglik) << std::endl;
-  //   }else{
-  //     // s1 = maa_true(a,y)*disp;
-  //     // s2 = (Type(1)-maa_true(a,y))*disp;
-  //     s1 = invlogit(alpha_g(a))*disp;
-  //     s2 = (Type(1)-invlogit(alpha_g(a)))*disp;
-  //     s3 = logspace_sub(log_inverse_linkfun(eta(i) - psi(0), log_link),
-  //                       log_inverse_linkfun(eta(i) - psi(1), log_link));
-  //     ans_g += -s3 - dbeta(obs_g(i,2), s1, s2, true);
-  //     }
-  //   // ans_g+=-tmp_loglik;
-  // }
-
   Type ans=ans_w+ans_g;
 
   ADREPORT(waa_true);

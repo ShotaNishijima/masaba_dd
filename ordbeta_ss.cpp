@@ -89,13 +89,13 @@ Type log1m_inverse_linkfun(Type eta, int link) {
 template<class Type>
 Type objective_function<Type>::operator() ()
 {
-  DATA_ARRAY(maa);
+  DATA_ARRAY(obs_g);
   DATA_ARRAY(naa);
   PARAMETER_VECTOR(alpha);
-  // PARAMETER(logdisp);
+  PARAMETER(logdisp);
   PARAMETER_VECTOR(psi);
   PARAMETER(omicron);
-  // PARAMETER_ARRAY(logitmaa);
+  PARAMETER_ARRAY(logitmaa);
   PARAMETER_VECTOR(beta);
   
   // vector<Type> y_pred = invlogit(alpha(x));
@@ -103,11 +103,17 @@ Type objective_function<Type>::operator() ()
   Type disp=exp(logdisp);
   Type s1,s2;
   Type s3;
-  // Type v,r;
-  // array<Type> maa_true(logitmaa.rows(),logitmaa.cols());
-  array<Type> maa_pred(maa.rows(),maa.cols());
+  Type v,r;
+  array<Type> maa_true(logitmaa.rows(),logitmaa.cols());
+  array<Type> maa_pred(logitmaa.rows(),logitmaa.cols());
   
-  // process model (no mearsurement error)
+  // process model
+  for(int j=0;j<logitmaa.cols();j++){
+    for(int i=0;i<logitmaa.rows();i++){
+      maa_true(i,j) = invlogit(logitmaa(i,j));
+    }
+  }
+  
   for(int j=1;j<logitmaa.cols();j++){
     for(int i=0;i<logitmaa.rows();i++){
       if(i==0){

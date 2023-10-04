@@ -90,13 +90,13 @@ template<class Type>
 Type objective_function<Type>::operator() ()
 {
   DATA_ARRAY(maa);
-  DATA_ARRAY(naa);
+  // DATA_ARRAY(naa);
   PARAMETER_VECTOR(alpha);
   // PARAMETER(logdisp);
   PARAMETER_VECTOR(psi);
   PARAMETER(omicron);
-  // PARAMETER_ARRAY(logitmaa);
-  PARAMETER_VECTOR(beta);
+  PARAMETER_ARRAY(logitmaa);
+  // PARAMETER_VECTOR(beta);
   
   // vector<Type> y_pred = invlogit(alpha(x));
   Type ans=0.0;
@@ -107,7 +107,7 @@ Type objective_function<Type>::operator() ()
   // array<Type> maa_true(logitmaa.rows(),logitmaa.cols());
   array<Type> maa_pred(maa.rows(),maa.cols());
   
-  // process model (no mearsurement error)
+  // process model
   for(int j=1;j<logitmaa.cols();j++){
     for(int i=0;i<logitmaa.rows();i++){
       if(i==0){

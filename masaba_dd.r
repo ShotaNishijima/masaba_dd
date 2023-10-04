@@ -608,7 +608,8 @@ newdata_mat = expand.grid(Age=unique(maa_dat$Age),N=unique(maa_dat$N),
 # tmp2-tmp
 # 
 
-newdata_mat = newdata_mat %>% mutate(y=predict(mod_mat,newdata=newdata_mat,type="response")) %>%
+newdata_mat = newdata_mat %>% 
+  mutate(y=predict(mod_mat,newdata=newdata_mat,type="response")) %>%
   mutate(y0 = y0_trans(y,N)) %>%
   mutate(y0 = pmin(1,pmax(0,y0)))
 
